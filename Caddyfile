@@ -1,0 +1,5 @@
+YOUR_DOMAIN.com {
+  encode zstd gzip
+
+  reverse_proxy securechat:8080
+}
