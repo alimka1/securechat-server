@@ -3,7 +3,7 @@ package com.securechat.server.models
 import kotlinx.serialization.Serializable
 
 @Serializable
-data class AuthRequest(val userId: String)
+data class AuthRequest(val userId: String, val password: String)
 
 @Serializable
 data class AuthResponse(val token: String)

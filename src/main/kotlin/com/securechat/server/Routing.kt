@@ -14,6 +14,7 @@ import io.ktor.server.request.receiveMultipart
 import io.ktor.server.request.receiveText
 import io.ktor.server.response.respond
 import io.ktor.server.response.respondFile
+import io.ktor.server.response.respondText
 import io.ktor.server.routing.*
 import io.ktor.server.websocket.*
 import io.ktor.websocket.*
@@ -33,7 +34,64 @@ fun Application.configureRouting(json: Json) {
     // Backup directory
     val backupDir = File("backups").apply { mkdirs() }
 
+    // In-memory auth storage: userId -> password
+    val users = mutableMapOf<String, String>()
+
     routing {
+
+        get("/") {
+            call.respondText("OK", ContentType.Text.Plain)
+        }
+
+        post("/register") {
+            try {
+                val body = try {
+                    call.receive<AuthRequest>()
+                } catch (e: Exception) {
+                    call.application.log.info("Register attempt: invalid request body")
+                    call.respond(HttpStatusCode.BadRequest, ErrorResponse("Invalid request body. Expected JSON: { userId, password }"))
+                    return@post
+                }
+                val userId = body.userId.trim()
+                val password = body.password
+                call.application.log.info("Register attempt: userId=$userId")
+                if (userId.isBlank() || password.isBlank()) {
+                    call.respond(HttpStatusCode.BadRequest, ErrorResponse("userId and password must not be blank"))
+                    return@post
+                }
+                if (users.containsKey(userId)) {
+                    call.respond(HttpStatusCode.Conflict, ErrorResponse("User already exists"))
+                    return@post
+                }
+                users[userId] = password
+                call.respond(AuthResponse("token_$userId"))
+            } catch (e: Exception) {
+                call.respond(HttpStatusCode.InternalServerError, ErrorResponse("Registration failed"))
+            }
+        }
+
+        post("/login") {
+            try {
+                val body = try {
+                    call.receive<AuthRequest>()
+                } catch (e: Exception) {
+                    call.application.log.info("Login attempt: invalid request body")
+                    call.respond(HttpStatusCode.BadRequest, ErrorResponse("Invalid request body. Expected JSON: { userId, password }"))
+                    return@post
+                }
+                val userId = body.userId.trim()
+                val password = body.password
+                call.application.log.info("Login attempt: userId=$userId")
+                val storedPassword = users[userId]
+                if (storedPassword == null || storedPassword != password) {
+                    call.respond(HttpStatusCode.Unauthorized, ErrorResponse("Invalid userId or password"))
+                    return@post
+                }
+                call.respond(AuthResponse("token_$userId"))
+            } catch (e: Exception) {
+                call.respond(HttpStatusCode.InternalServerError, ErrorResponse("Login failed"))
+            }
+        }
 
         // MVP auth: принимает userId в plain text и выдаёт JWT
         // В production заменим на регистрацию + device proof.
@@ -60,54 +118,53 @@ fun Application.configureRouting(json: Json) {
             call.respond(AuthResponse(token))
         }
 
-        authenticate("auth-jwt") {
+        // --- WebRTC Signaling (token from query param: ?token=token_<userId>) ---
+        webSocket("/signal/{userId}") {
+            val token = call.request.queryParameters["token"]
+            if (token.isNullOrBlank() || !token.startsWith("token_")) {
+                close(CloseReason(CloseReason.Codes.VIOLATED_POLICY, "Invalid or missing token"))
+                return@webSocket
+            }
+            val userId = token.removePrefix("token_").trim()
+            if (userId.isBlank()) {
+                close(CloseReason(CloseReason.Codes.VIOLATED_POLICY, "Invalid token"))
+                return@webSocket
+            }
+            val pathUserId = call.parameters["userId"]
+            if (pathUserId != null && pathUserId != userId) {
+                close(CloseReason(CloseReason.Codes.VIOLATED_POLICY, "userId mismatch"))
+                return@webSocket
+            }
 
-            // --- WebRTC Signaling ---
-            // ВАЖНО: userId берём из JWT. Path userId только проверяем на совпадение.
-            webSocket("/signal/{userId}") {
-                val principal = call.principal<JWTPrincipal>()
-                if (principal == null) {
-                    close(CloseReason(CloseReason.Codes.VIOLATED_POLICY, "No auth"))
-                    return@webSocket
-                }
+            connections[userId] = this
 
-                val jwtUserId = Security.userId(principal)
-                val pathUserId = call.parameters["userId"]
-                if (pathUserId != null && pathUserId != jwtUserId) {
-                    close(CloseReason(CloseReason.Codes.VIOLATED_POLICY, "userId mismatch"))
-                    return@webSocket
-                }
+            try {
+                for (frame in incoming) {
+                    if (frame is Frame.Text) {
+                        val raw = frame.readText()
 
-                connections[jwtUserId] = this
+                        val msg = runCatching { json.decodeFromString(SignalMessage.serializer(), raw) }.getOrNull()
+                            ?: continue
 
-                try {
-                    for (frame in incoming) {
-                        if (frame is Frame.Text) {
-                            val raw = frame.readText()
+                        val to = msg.to?.trim().orEmpty()
+                        if (to.isBlank()) continue
 
-                            // Сервер не обязан понимать payload. Можно просто релей.
-                            // Но минимально проверим JSON на наличие "to" если хочешь.
-                            val msg = runCatching { json.decodeFromString(SignalMessage.serializer(), raw) }.getOrNull()
-                                ?: continue
-
-                            val to = msg.to?.trim().orEmpty()
-                            if (to.isBlank()) continue
-
-                            // Relay only to 'to'
-                            connections[to]?.send(
-                                Frame.Text(
-                                    json.encodeToString(
-                                        SignalMessage.serializer(),
-                                        msg.copy(from = jwtUserId) // сервер подставляет from
-                                    )
+                        connections[to]?.send(
+                            Frame.Text(
+                                json.encodeToString(
+                                    SignalMessage.serializer(),
+                                    msg.copy(from = userId)
                                 )
                             )
-                        }
+                        )
                     }
-                } finally {
-                    connections.remove(jwtUserId)
                 }
+            } finally {
+                connections.remove(userId)
             }
+        }
+
+        authenticate("auth-jwt") {
 
             // --- PreKeys publish (client uploads its bundle) ---
             post("/prekeys/publish") {
