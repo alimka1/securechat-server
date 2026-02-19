@@ -40,3 +40,15 @@ data class PreKeyBundleResponse(
 
 @Serializable
 data class ErrorResponse(val error: String)
+
+@Serializable
+data class InviteCreateRequest(val userId: String)
+
+@Serializable
+data class InviteCreateResponse(val code: String, val expiresAt: Long)
+
+@Serializable
+data class InviteConsumeRequest(val code: String)
+
+@Serializable
+data class InviteConsumeResponse(val ownerUserId: String)

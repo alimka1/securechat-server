@@ -37,6 +37,10 @@ fun Application.configureRouting(json: Json) {
     // In-memory auth storage: userId -> password
     val users = mutableMapOf<String, String>()
 
+    // One-time invite storage: code -> InviteEntry
+    data class InviteEntry(val ownerUserId: String, val expiresAt: Long, var used: Boolean = false)
+    val invites = mutableMapOf<String, InviteEntry>()
+
     routing {
 
         get("/") {
@@ -90,6 +94,56 @@ fun Application.configureRouting(json: Json) {
                 call.respond(AuthResponse("token_$userId"))
             } catch (e: Exception) {
                 call.respond(HttpStatusCode.InternalServerError, ErrorResponse("Login failed"))
+            }
+        }
+
+        post("/invites/create") {
+            try {
+                val body = call.receive<InviteCreateRequest>()
+                val ownerUserId = body.userId.trim()
+                if (ownerUserId.isBlank()) {
+                    call.respond(HttpStatusCode.BadRequest, ErrorResponse("userId must not be blank"))
+                    return@post
+                }
+                val code = UUID.randomUUID().toString().replace("-", "").take(16)
+                val expiresAt = System.currentTimeMillis() + 5 * 60 * 1000
+                invites[code] = InviteEntry(ownerUserId = ownerUserId, expiresAt = expiresAt)
+                call.application.log.info("Invite create: code=$code ownerUserId=$ownerUserId")
+                call.respond(InviteCreateResponse(code = code, expiresAt = expiresAt))
+            } catch (e: Exception) {
+                call.respond(HttpStatusCode.BadRequest, ErrorResponse("Invalid request body. Expected JSON: { userId }"))
+            }
+        }
+
+        post("/invites/consume") {
+            try {
+                val body = call.receive<InviteConsumeRequest>()
+                val code = body.code.trim()
+                if (code.isBlank()) {
+                    call.respond(HttpStatusCode.BadRequest, ErrorResponse("code must not be blank"))
+                    return@post
+                }
+                val entry = invites[code]
+                if (entry == null) {
+                    call.application.log.info("Invite consume: code=$code result=not_found")
+                    call.respond(HttpStatusCode.NotFound, ErrorResponse("Invalid code"))
+                    return@post
+                }
+                if (entry.used) {
+                    call.application.log.info("Invite consume: code=$code ownerUserId=${entry.ownerUserId} result=already_used")
+                    call.respond(HttpStatusCode.Conflict, ErrorResponse("Already used"))
+                    return@post
+                }
+                if (System.currentTimeMillis() > entry.expiresAt) {
+                    call.application.log.info("Invite consume: code=$code ownerUserId=${entry.ownerUserId} result=expired")
+                    call.respond(HttpStatusCode.Gone, ErrorResponse("Expired"))
+                    return@post
+                }
+                entry.used = true
+                call.application.log.info("Invite consume: code=$code ownerUserId=${entry.ownerUserId} result=success")
+                call.respond(InviteConsumeResponse(ownerUserId = entry.ownerUserId))
+            } catch (e: Exception) {
+                call.respond(HttpStatusCode.BadRequest, ErrorResponse("Invalid request body. Expected JSON: { code }"))
             }
         }
 
