@@ -25,6 +25,54 @@ import org.jetbrains.exposed.sql.transactions.transaction
 import java.io.File
 import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
+private suspend fun handleWsSession(
+    userId: String,
+    session: DefaultWebSocketServerSession,
+    connections: ConcurrentHashMap<String, DefaultWebSocketServerSession>,
+    json: Json,
+    log: (String) -> Unit
+) {
+    connections[userId] = session
+    log("WebSocket connect: userId=$userId")
+
+    try {
+        for (frame in session.incoming) {
+            if (frame is Frame.Text) {
+                val raw = frame.readText()
+
+                val msg = runCatching { json.decodeFromString(SignalMessage.serializer(), raw) }.getOrNull()
+                    ?: continue
+
+                val to = msg.to?.trim().orEmpty()
+                if (to.isBlank()) {
+                    log("Signal: msg.to is blank, ignoring")
+                    continue
+                }
+
+                log("Signal in: from=$userId to=$to type=${msg.type} payloadLen=${msg.payload.length}")
+
+                val targetSession = connections[to]
+                if (targetSession == null) {
+                    log("Signal: target not connected to=$to")
+                    continue
+                }
+
+                targetSession.send(
+                    Frame.Text(
+                        json.encodeToString(
+                            SignalMessage.serializer(),
+                            msg.copy(from = userId)
+                        )
+                    )
+                )
+                log("Signal out: from=$userId to=$to type=${msg.type}")
+            }
+        }
+    } finally {
+        connections.remove(userId)
+        log("WebSocket disconnect: userId=$userId")
+    }
+}
 
 fun Application.configureRouting(json: Json) {
 
@@ -172,7 +220,22 @@ fun Application.configureRouting(json: Json) {
             call.respond(AuthResponse(token))
         }
 
-        // --- WebRTC Signaling (token from query param: ?token=token_<userId>) ---
+        // --- WebSocket alias for Android client: /ws?token=token_<userId> ---
+        webSocket("/ws") {
+            val token = call.request.queryParameters["token"]
+            if (token.isNullOrBlank() || !token.startsWith("token_")) {
+                close(CloseReason(CloseReason.Codes.VIOLATED_POLICY, "Invalid or missing token"))
+                return@webSocket
+            }
+            val userId = token.removePrefix("token_").trim()
+            if (userId.isBlank()) {
+                close(CloseReason(CloseReason.Codes.VIOLATED_POLICY, "Invalid token"))
+                return@webSocket
+            }
+            handleWsSession(userId, this, connections, json) { call.application.log.info(it) }
+        }
+
+        // --- WebRTC Signaling: /signal/{userId}?token=token_<userId> (path userId must match token) ---
         webSocket("/signal/{userId}") {
             val token = call.request.queryParameters["token"]
             if (token.isNullOrBlank() || !token.startsWith("token_")) {
@@ -189,33 +252,7 @@ fun Application.configureRouting(json: Json) {
                 close(CloseReason(CloseReason.Codes.VIOLATED_POLICY, "userId mismatch"))
                 return@webSocket
             }
-
-            connections[userId] = this
-
-            try {
-                for (frame in incoming) {
-                    if (frame is Frame.Text) {
-                        val raw = frame.readText()
-
-                        val msg = runCatching { json.decodeFromString(SignalMessage.serializer(), raw) }.getOrNull()
-                            ?: continue
-
-                        val to = msg.to?.trim().orEmpty()
-                        if (to.isBlank()) continue
-
-                        connections[to]?.send(
-                            Frame.Text(
-                                json.encodeToString(
-                                    SignalMessage.serializer(),
-                                    msg.copy(from = userId)
-                                )
-                            )
-                        )
-                    }
-                }
-            } finally {
-                connections.remove(userId)
-            }
+            handleWsSession(userId, this, connections, json) { call.application.log.info(it) }
         }
 
         authenticate("auth-jwt") {
