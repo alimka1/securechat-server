@@ -37,35 +37,44 @@ private suspend fun handleWsSession(
 
     try {
         for (frame in session.incoming) {
-            if (frame is Frame.Text) {
-                val raw = frame.readText()
+            try {
+                if (frame is Frame.Text) {
+                    val raw = frame.readText()
 
-                val msg = runCatching { json.decodeFromString(SignalMessage.serializer(), raw) }.getOrNull()
-                    ?: continue
+                    val msg = runCatching { json.decodeFromString(SignalMessage.serializer(), raw) }.getOrNull()
+                        ?: continue
 
-                val to = msg.to?.trim().orEmpty()
-                if (to.isBlank()) {
-                    log("Signal: msg.to is blank, ignoring")
-                    continue
-                }
+                    val to = msg.to?.trim().orEmpty()
+                    if (to.isBlank()) {
+                        log("Signal: msg.to is blank, ignoring")
+                        continue
+                    }
 
-                log("IN from=$userId to=$to type=${msg.type} payloadLen=${msg.payload.length}")
+                    log("IN from=$userId to=$to type=${msg.type} payloadLen=${msg.payload.length}")
 
-                val targetSession = connections[to]
-                if (targetSession == null) {
-                    log("DROP target_not_connected to=$to")
-                    continue
-                }
+                    val targetSession = connections[to]
+                    if (targetSession == null) {
+                        log("DROP target_not_connected to=$to")
+                        continue
+                    }
 
-                targetSession.send(
-                    Frame.Text(
-                        json.encodeToString(
-                            SignalMessage.serializer(),
-                            msg.copy(from = userId)
+                    try {
+                        targetSession.send(
+                            Frame.Text(
+                                json.encodeToString(
+                                    SignalMessage.serializer(),
+                                    msg.copy(from = userId)
+                                )
+                            )
                         )
-                    )
-                )
-                log("OUT to=$to ok")
+                        log("OUT to=$to ok")
+                    } catch (e: Exception) {
+                        log("WS send failed to=$to reason=${e.message}")
+                        connections.remove(to)
+                    }
+                }
+            } catch (e: Exception) {
+                log("WS frame error: ${e.message}")
             }
         }
     } finally {
