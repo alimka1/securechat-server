@@ -49,11 +49,11 @@ private suspend fun handleWsSession(
                     continue
                 }
 
-                log("Signal in: from=$userId to=$to type=${msg.type} payloadLen=${msg.payload.length}")
+                log("IN from=$userId to=$to type=${msg.type} payloadLen=${msg.payload.length}")
 
                 val targetSession = connections[to]
                 if (targetSession == null) {
-                    log("Signal: target not connected to=$to")
+                    log("DROP target_not_connected to=$to")
                     continue
                 }
 
@@ -65,7 +65,7 @@ private suspend fun handleWsSession(
                         )
                     )
                 )
-                log("Signal out: from=$userId to=$to type=${msg.type}")
+                log("OUT to=$to ok")
             }
         }
     } finally {
