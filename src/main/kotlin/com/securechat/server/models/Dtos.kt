@@ -6,9 +6,6 @@ import kotlinx.serialization.Serializable
 data class AuthRequest(val userId: String, val password: String)
 
 @Serializable
-data class AuthResponse(val token: String)
-
-@Serializable
 data class PublishPreKeyRequest(
     val userId: String,
     val deviceId: String,

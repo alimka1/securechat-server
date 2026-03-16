@@ -3,6 +3,7 @@ package com.securechat.server
 import com.auth0.jwt.JWT
 import com.securechat.server.auth.AuthService
 import com.securechat.server.auth.AuthTokenService
+import com.securechat.server.dto.AuthResponse
 import com.securechat.server.models.*
 import com.securechat.server.routes.authRoutes
 import com.securechat.server.routes.accountBackupRoutes
@@ -31,6 +32,7 @@ import org.jetbrains.exposed.sql.*
 import org.jetbrains.exposed.sql.SqlExpressionBuilder.eq
 import org.jetbrains.exposed.sql.transactions.transaction
 import java.io.File
+import java.util.Date
 import java.util.UUID
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.jsonObject
@@ -144,7 +146,14 @@ fun Application.configureRouting(json: Json) {
                     return@post
                 }
                 users[userId] = password
-                call.respond(AuthResponse("token_$userId"))
+                val expiresAt = System.currentTimeMillis() + 24 * 60 * 60 * 1000L
+                val token = JWT.create()
+                    .withAudience(Security.AUD)
+                    .withIssuer(Security.ISS)
+                    .withClaim("userId", userId)
+                    .withExpiresAt(Date(expiresAt))
+                    .sign(Security.algorithm())
+                call.respond(AuthResponse(userId = userId, username = userId, accessToken = token, refreshToken = token, expiresAt = expiresAt))
             } catch (e: Exception) {
                 call.respond(HttpStatusCode.InternalServerError, ErrorResponse("Registration failed"))
             }
@@ -167,7 +176,14 @@ fun Application.configureRouting(json: Json) {
                     call.respond(HttpStatusCode.Unauthorized, ErrorResponse("Invalid userId or password"))
                     return@post
                 }
-                call.respond(AuthResponse("token_$userId"))
+                val expiresAt = System.currentTimeMillis() + 24 * 60 * 60 * 1000L
+                val token = JWT.create()
+                    .withAudience(Security.AUD)
+                    .withIssuer(Security.ISS)
+                    .withClaim("userId", userId)
+                    .withExpiresAt(Date(expiresAt))
+                    .sign(Security.algorithm())
+                call.respond(AuthResponse(userId = userId, username = userId, accessToken = token, refreshToken = token, expiresAt = expiresAt))
             } catch (e: Exception) {
                 call.respond(HttpStatusCode.InternalServerError, ErrorResponse("Login failed"))
             }
@@ -239,13 +255,15 @@ fun Application.configureRouting(json: Json) {
                 }
             }
 
+            val expiresAt = System.currentTimeMillis() + 24 * 60 * 60 * 1000L
             val token = JWT.create()
                 .withAudience(Security.AUD)
                 .withIssuer(Security.ISS)
                 .withClaim("userId", userId)
+                .withExpiresAt(Date(expiresAt))
                 .sign(Security.algorithm())
 
-            call.respond(AuthResponse(token))
+            call.respond(AuthResponse(userId = userId, username = userId, accessToken = token, refreshToken = token, expiresAt = expiresAt))
         }
 
         // --- WebSocket alias for Android client: /ws?token=token_<userId> ---
