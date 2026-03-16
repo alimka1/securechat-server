@@ -10,8 +10,10 @@ import io.ktor.server.plugins.cors.routing.CORS
 import io.ktor.server.websocket.WebSockets
 import io.ktor.serialization.kotlinx.json.*
 import io.ktor.http.*
+import kotlinx.serialization.ExperimentalSerializationApi
 import kotlinx.serialization.json.Json
 
+@OptIn(ExperimentalSerializationApi::class)
 private val jsonFormat = Json {
     prettyPrint = false
     ignoreUnknownKeys = true

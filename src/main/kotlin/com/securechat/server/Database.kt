@@ -1,6 +1,16 @@
 package com.securechat.server
 
-import com.securechat.server.models.*
+import com.securechat.server.models.AccountBackups
+import com.securechat.server.models.AuthUsers
+import com.securechat.server.models.Backups
+import com.securechat.server.models.ChatParticipants
+import com.securechat.server.models.Chats
+import com.securechat.server.models.Devices
+import com.securechat.server.models.Messages
+import com.securechat.server.models.OneTimePreKeys
+import com.securechat.server.models.PreKeys
+import com.securechat.server.models.Profiles
+import com.securechat.server.models.Users
 import com.zaxxer.hikari.HikariConfig
 import com.zaxxer.hikari.HikariDataSource
 import org.jetbrains.exposed.sql.Database
@@ -50,7 +60,19 @@ fun initDatabase() {
     Database.connect(ds)
 
     transaction {
-        SchemaUtils.create(Users, Devices, PreKeys, OneTimePreKeys, Backups)
+        SchemaUtils.create(
+            Users,
+            AuthUsers,
+            Devices,
+            PreKeys,
+            OneTimePreKeys,
+            Backups,
+            AccountBackups,
+            Profiles,
+            Chats,
+            ChatParticipants,
+            Messages,
+        )
     }
 }
 

@@ -1,7 +1,16 @@
 package com.securechat.server
 
 import com.auth0.jwt.JWT
+import com.securechat.server.auth.AuthService
+import com.securechat.server.auth.AuthTokenService
 import com.securechat.server.models.*
+import com.securechat.server.routes.authRoutes
+import com.securechat.server.routes.accountBackupRoutes
+import com.securechat.server.routes.profileRoutes
+import com.securechat.server.chat.ChatService
+import com.securechat.server.routes.chatRoutes
+import com.securechat.server.realtime.ChatRealtimeService
+import com.securechat.server.realtime.PresenceService
 import io.ktor.http.*
 import io.ktor.http.content.PartData
 import io.ktor.http.content.forEachPart
@@ -18,12 +27,14 @@ import io.ktor.server.response.respondText
 import io.ktor.server.routing.*
 import io.ktor.server.websocket.*
 import io.ktor.websocket.*
-import kotlinx.serialization.json.Json
 import org.jetbrains.exposed.sql.*
 import org.jetbrains.exposed.sql.SqlExpressionBuilder.eq
 import org.jetbrains.exposed.sql.transactions.transaction
 import java.io.File
 import java.util.UUID
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 import java.util.concurrent.ConcurrentHashMap
 private suspend fun handleWsSession(
     userId: String,
@@ -91,6 +102,12 @@ fun Application.configureRouting(json: Json) {
     // Backup directory
     val backupDir = File("backups").apply { mkdirs() }
 
+    val authService = AuthService()
+    val authTokenService = AuthTokenService()
+    val chatService = ChatService()
+    val chatRealtimeService = ChatRealtimeService(json)
+    val presenceService = PresenceService(chatService, chatRealtimeService)
+
     // In-memory auth storage: userId -> password
     val users = mutableMapOf<String, String>()
 
@@ -99,6 +116,8 @@ fun Application.configureRouting(json: Json) {
     val invites = mutableMapOf<String, InviteEntry>()
 
     routing {
+
+        authRoutes(authService, authTokenService)
 
         get("/") {
             call.respondText("OK", ContentType.Text.Plain)
@@ -265,6 +284,50 @@ fun Application.configureRouting(json: Json) {
         }
 
         authenticate("auth-jwt") {
+
+            accountBackupRoutes()
+            profileRoutes()
+            chatRoutes(chatService, chatRealtimeService)
+
+            webSocket("/ws/chat") {
+                val principal = call.principal<JWTPrincipal>()!!
+                val userId = Security.userId(principal)
+
+                chatRealtimeService.registerConnection(userId, this)
+                presenceService.onConnected(userId)
+                try {
+                    for (frame in incoming) {
+                        if (frame is Frame.Text) {
+                            val text = frame.readText()
+                            runCatching {
+                                val jsonElement = json.parseToJsonElement(text)
+                                val obj = jsonElement.jsonObject
+                                val type = obj["type"]?.jsonPrimitive?.content
+                                when (type) {
+                                    "typing.start" -> {
+                                        val chatId = obj["chatId"]?.jsonPrimitive?.content?.trim().orEmpty()
+                                        if (chatId.isNotBlank()) {
+                                            presenceService.handleTyping(userId, chatId, true)
+                                        }
+                                    }
+                                    "typing.stop" -> {
+                                        val chatId = obj["chatId"]?.jsonPrimitive?.content?.trim().orEmpty()
+                                        if (chatId.isNotBlank()) {
+                                            presenceService.handleTyping(userId, chatId, false)
+                                        }
+                                    }
+                                    "presence.ping" -> {
+                                        // could update lastSeen without broadcast; already handled on connect/disconnect
+                                    }
+                                }
+                            }
+                        }
+                    }
+                } finally {
+                    chatRealtimeService.removeConnection(userId, this)
+                    presenceService.onDisconnected(userId)
+                }
+            }
 
             // --- PreKeys publish (client uploads its bundle) ---
             post("/prekeys/publish") {

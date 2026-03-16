@@ -47,6 +47,14 @@ dependencies {
     implementation("com.auth0:java-jwt:4.4.0")
 }
 
+java {
+    // Force Java 17 toolchain for all Java/Kotlin compilation and runtime.
+    toolchain {
+        languageVersion.set(JavaLanguageVersion.of(17))
+    }
+}
+
 kotlin {
+    // Ensure Kotlin uses the same JVM target and toolchain.
     jvmToolchain(17)
 }

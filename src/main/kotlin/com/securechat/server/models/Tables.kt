@@ -10,6 +10,14 @@ object Users : Table("users") {
     override val primaryKey = PrimaryKey(userId)
 }
 
+object AuthUsers : Table("auth_users") {
+    val userId = varchar("user_id", 64).index()
+    val username = varchar("username", 64).uniqueIndex()
+    val passwordHash = text("password_hash")
+    val createdAt = timestamp("created_at").clientDefault { Clock.System.now() }
+    override val primaryKey = PrimaryKey(userId)
+}
+
 object Devices : Table("devices") {
     val deviceId = varchar("device_id", 64)
     val userId = varchar("user_id", 64).index()
@@ -45,6 +53,49 @@ object Backups : Table("backups") {
     val id = varchar("id", 64)
     val userId = varchar("user_id", 64).index()
     val filePath = text("file_path") // храним имя файла (не absolute path)
+    val createdAt = timestamp("created_at").clientDefault { Clock.System.now() }
+    override val primaryKey = PrimaryKey(id)
+}
+
+object AccountBackups : Table("account_backups") {
+    val userId = varchar("user_id", 64)
+    val encryptedBackupBlob = text("encrypted_backup_blob")
+    val backupVersion = integer("backup_version")
+    val clientUpdatedAt = long("client_updated_at")
+    val createdAt = timestamp("created_at").clientDefault { Clock.System.now() }
+    val updatedAt = timestamp("updated_at").clientDefault { Clock.System.now() }
+    override val primaryKey = PrimaryKey(userId)
+}
+
+object Profiles : Table("profiles") {
+    val userId = varchar("user_id", 64)
+    val displayName = varchar("display_name", 255).nullable()
+    val avatarUrl = text("avatar_url").nullable()
+    val createdAt = timestamp("created_at").clientDefault { Clock.System.now() }
+    val updatedAt = timestamp("updated_at").clientDefault { Clock.System.now() }
+    override val primaryKey = PrimaryKey(userId)
+}
+
+object Chats : Table("chats") {
+    val id = varchar("id", 64)
+    val isDirect = bool("is_direct").default(true)
+    val createdAt = timestamp("created_at").clientDefault { Clock.System.now() }
+    override val primaryKey = PrimaryKey(id)
+}
+
+object ChatParticipants : Table("chat_participants") {
+    val chatId = varchar("chat_id", 64).index()
+    val userId = varchar("user_id", 64).index()
+    val createdAt = timestamp("created_at").clientDefault { Clock.System.now() }
+    override val primaryKey = PrimaryKey(chatId, userId)
+}
+
+object Messages : Table("messages") {
+    val id = varchar("id", 64)
+    val chatId = varchar("chat_id", 64).index()
+    val senderId = varchar("sender_id", 64).index()
+    val content = text("content")
+    val status = varchar("status", 32).default("sent") // sent | delivered | read
     val createdAt = timestamp("created_at").clientDefault { Clock.System.now() }
     override val primaryKey = PrimaryKey(id)
 }
