@@ -1,7 +1,7 @@
-FROM gradle:8.7-jdk17 AS build
+FROM eclipse-temurin:17-jdk AS build
 WORKDIR /app
 COPY . .
-RUN gradle clean installDist -x test
+RUN chmod +x ./gradlew && ./gradlew clean installDist -x test --stacktrace
 
 FROM eclipse-temurin:17-jre
 WORKDIR /app
