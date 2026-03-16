@@ -34,6 +34,8 @@ fun Route.chatRoutes(
                     chatId = it.chatId,
                     isDirect = it.isDirect,
                     createdAt = it.createdAt,
+                    peerUserId = it.peerUserId,
+                    peerUsername = it.peerUsername,
                 )
             }
             call.respond(response)
@@ -119,11 +121,82 @@ fun Route.chatRoutes(
                 )
                 val participants = chatService.listParticipantIds(chatId)
                 realtime.pushNewMessage(participants, response)
+
+                // Sender always gets "sent" once persisted.
+                realtime.pushMessageStatus(
+                    recipients = listOf(userId),
+                    status = MessageStatusPush(
+                        messageId = msg.messageId,
+                        chatId = chatId,
+                        status = "sent",
+                        updatedAt = System.currentTimeMillis(),
+                    ),
+                )
+
+                // If at least one non-sender participant is online, promote to delivered.
+                val recipients = participants.filter { it != userId }
+                val onlineRecipients = realtime.filterOnlineUsers(recipients)
+                if (onlineRecipients.isNotEmpty()) {
+                    chatService.markMessageDelivered(chatId, msg.messageId, userId)
+                    realtime.pushMessageStatus(
+                        recipients = participants,
+                        status = MessageStatusPush(
+                            messageId = msg.messageId,
+                            chatId = chatId,
+                            status = "delivered",
+                            updatedAt = System.currentTimeMillis(),
+                        ),
+                    )
+                }
                 call.respond(HttpStatusCode.Created, response)
             } catch (e: IllegalAccessException) {
                 call.respond(
                     HttpStatusCode.Forbidden,
                     ErrorResponse("Not a participant of this chat"),
+                )
+            } catch (e: IllegalArgumentException) {
+                call.respond(
+                    HttpStatusCode.NotFound,
+                    ErrorResponse(e.message ?: "Message not found"),
+                )
+            }
+        }
+
+        post("/{chatId}/messages/{messageId}/delivered") {
+            val principal = call.principal<JWTPrincipal>()!!
+            val userId = Security.userId(principal)
+
+            val chatId = call.parameters["chatId"]?.trim().orEmpty()
+            val messageId = call.parameters["messageId"]?.trim().orEmpty()
+
+            if (chatId.isBlank() || messageId.isBlank()) {
+                call.respond(
+                    HttpStatusCode.BadRequest,
+                    ErrorResponse("chatId and messageId are required"),
+                )
+                return@post
+            }
+
+            try {
+                chatService.markMessageDelivered(chatId, messageId, userId)
+                val participants = chatService.listParticipantIds(chatId)
+                val statusEvent = MessageStatusPush(
+                    messageId = messageId,
+                    chatId = chatId,
+                    status = "delivered",
+                    updatedAt = System.currentTimeMillis(),
+                )
+                realtime.pushMessageStatus(participants, statusEvent)
+                call.respond(HttpStatusCode.NoContent, Unit)
+            } catch (e: IllegalAccessException) {
+                call.respond(
+                    HttpStatusCode.Forbidden,
+                    ErrorResponse("Not a participant of this chat"),
+                )
+            } catch (e: IllegalArgumentException) {
+                call.respond(
+                    HttpStatusCode.NotFound,
+                    ErrorResponse(e.message ?: "Message not found"),
                 )
             }
         }
@@ -150,6 +223,7 @@ fun Route.chatRoutes(
                     messageId = messageId,
                     chatId = chatId,
                     status = "read",
+                    updatedAt = System.currentTimeMillis(),
                 )
                 realtime.pushMessageStatus(participants, statusEvent)
                 call.respond(HttpStatusCode.NoContent, Unit)
@@ -157,6 +231,11 @@ fun Route.chatRoutes(
                 call.respond(
                     HttpStatusCode.Forbidden,
                     ErrorResponse("Not a participant of this chat"),
+                )
+            } catch (e: IllegalArgumentException) {
+                call.respond(
+                    HttpStatusCode.NotFound,
+                    ErrorResponse(e.message ?: "Message not found"),
                 )
             }
         }
@@ -198,6 +277,8 @@ fun Route.chatRoutes(
                     chatId = chat.chatId,
                     isDirect = chat.isDirect,
                     createdAt = chat.createdAt,
+                    peerUserId = chat.peerUserId,
+                    peerUsername = chat.peerUsername,
                 )
                 call.respond(response)
             } catch (e: IllegalArgumentException) {

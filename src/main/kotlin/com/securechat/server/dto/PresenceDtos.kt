@@ -4,7 +4,7 @@ import kotlinx.serialization.Serializable
 
 @Serializable
 data class PresenceUpdatePush(
-    val type: String = "presence.update",
+    val type: String = "presence",
     val userId: String,
     val status: String, // "online" | "offline"
     val lastSeen: Long,

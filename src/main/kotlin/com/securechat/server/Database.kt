@@ -5,6 +5,7 @@ import com.securechat.server.models.AuthUsers
 import com.securechat.server.models.Backups
 import com.securechat.server.models.ChatParticipants
 import com.securechat.server.models.Chats
+import com.securechat.server.models.ContactInvites
 import com.securechat.server.models.Devices
 import com.securechat.server.models.Messages
 import com.securechat.server.models.OneTimePreKeys
@@ -72,6 +73,7 @@ fun initDatabase() {
             Chats,
             ChatParticipants,
             Messages,
+            ContactInvites,
         )
     }
 }

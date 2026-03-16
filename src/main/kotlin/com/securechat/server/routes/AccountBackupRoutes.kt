@@ -1,10 +1,10 @@
 package com.securechat.server.routes
 
 import com.securechat.server.Security
+import com.securechat.server.backup.AccountBackupService
 import com.securechat.server.dto.BackupRestoreResponse
 import com.securechat.server.dto.BackupUploadRequest
 import com.securechat.server.dto.BackupUploadResponse
-import com.securechat.server.models.AccountBackups
 import com.securechat.server.models.ErrorResponse
 import io.ktor.http.HttpStatusCode
 import io.ktor.server.application.call
@@ -15,14 +15,10 @@ import io.ktor.server.response.respond
 import io.ktor.server.routing.Route
 import io.ktor.server.routing.post
 import io.ktor.server.routing.route
-import kotlinx.datetime.Clock
-import org.jetbrains.exposed.sql.SqlExpressionBuilder.eq
-import org.jetbrains.exposed.sql.insert
-import org.jetbrains.exposed.sql.update
-import org.jetbrains.exposed.sql.select
-import org.jetbrains.exposed.sql.transactions.transaction
 
-fun Route.accountBackupRoutes() {
+fun Route.accountBackupRoutes(
+    accountBackupService: AccountBackupService,
+) {
 
     route("/backup") {
 
@@ -81,29 +77,12 @@ fun Route.accountBackupRoutes() {
                 return@post
             }
 
-            transaction {
-                val existing = AccountBackups
-                    .select { AccountBackups.userId eq requestUserId }
-                    .firstOrNull()
-
-                if (existing == null) {
-                    AccountBackups.insert {
-                        it[userId] = requestUserId
-                        it[encryptedBackupBlob] = body.encryptedBackupBlob
-                        it[backupVersion] = body.backupVersion
-                        it[clientUpdatedAt] = body.clientUpdatedAt
-                        it[createdAt] = Clock.System.now()
-                        it[updatedAt] = Clock.System.now()
-                    }
-                } else {
-                    AccountBackups.update({ AccountBackups.userId eq requestUserId }) {
-                        it[encryptedBackupBlob] = body.encryptedBackupBlob
-                        it[backupVersion] = body.backupVersion
-                        it[clientUpdatedAt] = body.clientUpdatedAt
-                        it[updatedAt] = Clock.System.now()
-                    }
-                }
-            }
+            accountBackupService.upsertEncryptedBackup(
+                userId = requestUserId,
+                encryptedBackupBlob = body.encryptedBackupBlob,
+                backupVersion = body.backupVersion,
+                clientUpdatedAt = body.clientUpdatedAt,
+            )
 
             call.respond(
                 HttpStatusCode.OK,
@@ -115,13 +94,7 @@ fun Route.accountBackupRoutes() {
             val principal = call.principal<JWTPrincipal>()!!
             val jwtUserId = Security.userId(principal)
 
-            val row = transaction {
-                AccountBackups
-                    .select { AccountBackups.userId eq jwtUserId }
-                    .orderBy(AccountBackups.updatedAt, org.jetbrains.exposed.sql.SortOrder.DESC)
-                    .limit(1)
-                    .firstOrNull()
-            }
+            val row = accountBackupService.getEncryptedBackup(jwtUserId)
 
             if (row == null) {
                 call.respond(
@@ -132,10 +105,10 @@ fun Route.accountBackupRoutes() {
             }
 
             val response = BackupRestoreResponse(
-                userId = row[AccountBackups.userId],
-                encryptedBackupBlob = row[AccountBackups.encryptedBackupBlob],
-                backupVersion = row[AccountBackups.backupVersion],
-                clientUpdatedAt = row[AccountBackups.clientUpdatedAt],
+                userId = row.userId,
+                encryptedBackupBlob = row.encryptedBackupBlob,
+                backupVersion = row.backupVersion,
+                clientUpdatedAt = row.clientUpdatedAt,
             )
 
             call.respond(response)

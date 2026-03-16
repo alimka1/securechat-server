@@ -11,27 +11,44 @@ class PresenceService(
     private val realtime: ChatRealtimeService,
 ) {
 
-    private val onlineUsers = mutableSetOf<String>()
+    private val connectionCounts = mutableMapOf<String, Int>()
     private val lastSeen = mutableMapOf<String, Long>()
     private val typingByChat = mutableMapOf<String, MutableSet<String>>()
     private val mutex = Mutex()
 
     suspend fun onConnected(userId: String) {
         val now = System.currentTimeMillis()
-        mutex.withLock {
-            onlineUsers.add(userId)
+        val becameOnline = mutex.withLock {
+            val current = connectionCounts[userId] ?: 0
+            connectionCounts[userId] = current + 1
             lastSeen[userId] = now
+            current == 0
         }
-        broadcastPresence(userId, "online", now)
+        if (becameOnline) {
+            broadcastPresence(userId, "online", now)
+        }
     }
 
     suspend fun onDisconnected(userId: String) {
         val now = System.currentTimeMillis()
-        mutex.withLock {
-            onlineUsers.remove(userId)
+        val becameOffline = mutex.withLock {
+            val current = connectionCounts[userId] ?: 0
+            val offline = when {
+                current <= 1 -> {
+                    connectionCounts.remove(userId)
+                    true
+                }
+                else -> {
+                    connectionCounts[userId] = current - 1
+                    false
+                }
+            }
             lastSeen[userId] = now
+            offline
         }
-        broadcastPresence(userId, "offline", now)
+        if (becameOffline) {
+            broadcastPresence(userId, "offline", now)
+        }
     }
 
     suspend fun handleTyping(
@@ -39,6 +56,10 @@ class PresenceService(
         chatId: String,
         isTyping: Boolean,
     ) {
+        if (!chatService.isParticipant(chatId, userId)) {
+            throw IllegalAccessException("Not a participant of this chat")
+        }
+
         mutex.withLock {
             val set = typingByChat.getOrPut(chatId) { mutableSetOf() }
 

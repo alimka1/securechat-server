@@ -3,15 +3,20 @@ package com.securechat.server
 import com.auth0.jwt.JWT
 import com.securechat.server.auth.AuthService
 import com.securechat.server.auth.AuthTokenService
+import com.securechat.server.backup.AccountBackupService
+import com.securechat.server.call.CallSignalingService
 import com.securechat.server.dto.AuthResponse
 import com.securechat.server.models.*
 import com.securechat.server.routes.authRoutes
 import com.securechat.server.routes.accountBackupRoutes
 import com.securechat.server.routes.profileRoutes
 import com.securechat.server.chat.ChatService
+import com.securechat.server.contact.ContactInviteService
 import com.securechat.server.routes.chatRoutes
+import com.securechat.server.routes.contactInviteRoutes
 import com.securechat.server.realtime.ChatRealtimeService
 import com.securechat.server.realtime.PresenceService
+import com.securechat.server.realtime.RealtimeCommandService
 import io.ktor.http.*
 import io.ktor.http.content.PartData
 import io.ktor.http.content.forEachPart
@@ -35,8 +40,6 @@ import java.io.File
 import java.util.Date
 import java.util.UUID
 import kotlinx.serialization.json.Json
-import kotlinx.serialization.json.jsonObject
-import kotlinx.serialization.json.jsonPrimitive
 import java.util.concurrent.ConcurrentHashMap
 private suspend fun handleWsSession(
     userId: String,
@@ -107,8 +110,12 @@ fun Application.configureRouting(json: Json) {
     val authService = AuthService()
     val authTokenService = AuthTokenService()
     val chatService = ChatService()
+    val contactInviteService = ContactInviteService()
+    val accountBackupService = AccountBackupService()
     val chatRealtimeService = ChatRealtimeService(json)
     val presenceService = PresenceService(chatService, chatRealtimeService)
+    val callSignalingService = CallSignalingService(chatService, chatRealtimeService)
+    val realtimeCommandService = RealtimeCommandService(json, presenceService, callSignalingService)
 
     // One-time invite storage: code -> InviteEntry
     data class InviteEntry(val ownerUserId: String, val expiresAt: Long, var used: Boolean = false)
@@ -316,9 +323,10 @@ fun Application.configureRouting(json: Json) {
 
         authenticate("auth-jwt") {
 
-            accountBackupRoutes()
+            accountBackupRoutes(accountBackupService)
             profileRoutes()
             chatRoutes(chatService, chatRealtimeService)
+            contactInviteRoutes(contactInviteService, chatService)
 
             webSocket("/ws/chat") {
                 val principal = call.principal<JWTPrincipal>()!!
@@ -331,30 +339,12 @@ fun Application.configureRouting(json: Json) {
                         if (frame is Frame.Text) {
                             val text = frame.readText()
                             runCatching {
-                                val jsonElement = json.parseToJsonElement(text)
-                                val obj = jsonElement.jsonObject
-                                val type = obj["type"]?.jsonPrimitive?.content
-                                when (type) {
-                                    "typing.start" -> {
-                                        val chatId = obj["chatId"]?.jsonPrimitive?.content?.trim().orEmpty()
-                                        if (chatId.isNotBlank()) {
-                                            presenceService.handleTyping(userId, chatId, true)
-                                        }
-                                    }
-                                    "typing.stop" -> {
-                                        val chatId = obj["chatId"]?.jsonPrimitive?.content?.trim().orEmpty()
-                                        if (chatId.isNotBlank()) {
-                                            presenceService.handleTyping(userId, chatId, false)
-                                        }
-                                    }
-                                    "presence.ping" -> {
-                                        // could update lastSeen without broadcast; already handled on connect/disconnect
-                                    }
-                                }
+                                realtimeCommandService.handleTextCommand(userId, text)
                             }
                         }
                     }
                 } finally {
+                    runCatching { callSignalingService.onUserDisconnected(userId) }
                     chatRealtimeService.removeConnection(userId, this)
                     presenceService.onDisconnected(userId)
                 }

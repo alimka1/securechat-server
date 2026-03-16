@@ -95,7 +95,19 @@ object Messages : Table("messages") {
     val chatId = varchar("chat_id", 64).index()
     val senderId = varchar("sender_id", 64).index()
     val content = text("content")
-    val status = varchar("status", 32).default("sent") // sent | delivered | read
+    val status = varchar("status", 32).default("sent") // sending | sent | delivered | read
     val createdAt = timestamp("created_at").clientDefault { Clock.System.now() }
     override val primaryKey = PrimaryKey(id)
+}
+
+object ContactInvites : Table("contact_invites") {
+    val inviteToken = varchar("invite_token", 128)
+    val inviterUserId = varchar("inviter_user_id", 64).index()
+    val inviterUsername = varchar("inviter_username", 64)
+    val expiresAt = long("expires_at")
+    val used = bool("used").default(false).index()
+    val acceptedByUserId = varchar("accepted_by_user_id", 64).nullable()
+    val usedAt = long("used_at").nullable()
+    val createdAt = timestamp("created_at").clientDefault { Clock.System.now() }
+    override val primaryKey = PrimaryKey(inviteToken)
 }

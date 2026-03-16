@@ -10,16 +10,20 @@ import org.jetbrains.exposed.sql.SqlExpressionBuilder.eq
 import org.jetbrains.exposed.sql.SqlExpressionBuilder.neq
 import org.jetbrains.exposed.sql.and
 import org.jetbrains.exposed.sql.insert
+import org.jetbrains.exposed.sql.insertIgnore
 import org.jetbrains.exposed.sql.select
 import org.jetbrains.exposed.sql.transactions.transaction
 import org.jetbrains.exposed.sql.update
 import org.jetbrains.exposed.sql.SqlExpressionBuilder.inList
+import java.security.MessageDigest
 import java.util.UUID
 
 data class ChatSummary(
     val chatId: String,
     val isDirect: Boolean,
     val createdAt: Long,
+    val peerUserId: String? = null,
+    val peerUsername: String? = null,
 )
 
 data class ChatMessage(
@@ -32,18 +36,49 @@ data class ChatMessage(
 )
 
 class ChatService {
+    private val statusRank = mapOf(
+        "sending" to 0,
+        "sent" to 1,
+        "delivered" to 2,
+        "read" to 3,
+    )
+
 
     fun listChatsForUser(userId: String): List<ChatSummary> = transaction {
-        (Chats innerJoin ChatParticipants)
+        val chatRows = (Chats innerJoin ChatParticipants)
             .select { ChatParticipants.userId eq userId }
             .orderBy(Chats.createdAt, org.jetbrains.exposed.sql.SortOrder.DESC)
-            .map { row ->
-                ChatSummary(
-                    chatId = row[Chats.id],
-                    isDirect = row[Chats.isDirect],
-                    createdAt = row[Chats.createdAt].toJavaInstant().toEpochMilli(),
-                )
+            .toList()
+
+        chatRows.map { row ->
+            val chatId = row[Chats.id]
+            val isDirect = row[Chats.isDirect]
+
+            var peerUserId: String? = null
+            var peerUsername: String? = null
+            if (isDirect) {
+                val participants = ChatParticipants
+                    .select { ChatParticipants.chatId eq chatId }
+                    .map { it[ChatParticipants.userId] }
+                if (participants.size == 2) {
+                    peerUserId = participants.firstOrNull { it != userId }
+                    if (peerUserId != null) {
+                        peerUsername = AuthUsers
+                            .select { AuthUsers.userId eq peerUserId }
+                            .firstOrNull()
+                            ?.get(AuthUsers.username)
+                    }
+                }
             }
+
+            ChatSummary(
+                chatId = chatId,
+                isDirect = isDirect,
+                createdAt = row[Chats.createdAt].toJavaInstant().toEpochMilli(),
+                peerUserId = peerUserId,
+                peerUsername = peerUsername,
+            )
+        }
     }
 
     fun getMessagesForChat(
@@ -93,7 +128,7 @@ class ChatService {
             .any()
         require(otherExists) { "Other user not found" }
 
-        // try to find existing direct chat with exactly these two participants
+        // find existing direct chat with exactly these two participants
         val existingChatId = findDirectChatId(userId, otherUserId)
         if (existingChatId != null) {
             val chatRow = Chats
@@ -103,20 +138,26 @@ class ChatService {
                 chatId = chatRow[Chats.id],
                 isDirect = chatRow[Chats.isDirect],
                 createdAt = chatRow[Chats.createdAt].toJavaInstant().toEpochMilli(),
+                peerUserId = otherUserId,
+                peerUsername = AuthUsers
+                    .select { AuthUsers.userId eq otherUserId }
+                    .firstOrNull()
+                    ?.get(AuthUsers.username),
             )
         }
 
-        val chatId = UUID.randomUUID().toString()
+        // Deterministic id avoids duplicates for the same user pair.
+        val chatId = directChatIdFor(userId, otherUserId)
 
-        Chats.insert {
+        Chats.insertIgnore {
             it[id] = chatId
             it[isDirect] = true
         }
-        ChatParticipants.insert {
+        ChatParticipants.insertIgnore {
             it[ChatParticipants.chatId] = chatId
             it[ChatParticipants.userId] = userId
         }
-        ChatParticipants.insert {
+        ChatParticipants.insertIgnore {
             it[ChatParticipants.chatId] = chatId
             it[ChatParticipants.userId] = otherUserId
         }
@@ -129,6 +170,11 @@ class ChatService {
             chatId = chatId,
             isDirect = true,
             createdAt = createdAt.toJavaInstant().toEpochMilli(),
+            peerUserId = otherUserId,
+            peerUsername = AuthUsers
+                .select { AuthUsers.userId eq otherUserId }
+                .firstOrNull()
+                ?.get(AuthUsers.username),
         )
     }
 
@@ -136,6 +182,12 @@ class ChatService {
         ChatParticipants
             .select { ChatParticipants.chatId eq chatId }
             .map { it[ChatParticipants.userId] }
+    }
+
+    fun isParticipant(chatId: String, userId: String): Boolean = transaction {
+        ChatParticipants
+            .select { (ChatParticipants.chatId eq chatId) and (ChatParticipants.userId eq userId) }
+            .any()
     }
 
     fun listContactIds(userId: String): List<String> = transaction {
@@ -154,6 +206,27 @@ class ChatService {
         }
     }
 
+    fun markMessageDelivered(
+        chatId: String,
+        messageId: String,
+        userId: String,
+    ) {
+        transaction {
+            ensureParticipant(chatId, userId)
+            val row = Messages
+                .select { (Messages.id eq messageId) and (Messages.chatId eq chatId) }
+                .firstOrNull()
+                ?: throw IllegalArgumentException("Message not found")
+
+            val currentStatus = row[Messages.status]
+            if (shouldPromote(currentStatus, "delivered")) {
+                Messages.update({ (Messages.id eq messageId) and (Messages.chatId eq chatId) }) { updateRow ->
+                    updateRow[Messages.status] = "delivered"
+                }
+            }
+        }
+    }
+
     fun markMessageRead(
         chatId: String,
         messageId: String,
@@ -162,8 +235,16 @@ class ChatService {
         transaction {
             ensureParticipant(chatId, userId)
 
-            Messages.update({ (Messages.id eq messageId) and (Messages.chatId eq chatId) }) { row ->
-                row[Messages.status] = "read"
+            val row = Messages
+                .select { (Messages.id eq messageId) and (Messages.chatId eq chatId) }
+                .firstOrNull()
+                ?: throw IllegalArgumentException("Message not found")
+
+            val currentStatus = row[Messages.status]
+            if (shouldPromote(currentStatus, "read")) {
+                Messages.update({ (Messages.id eq messageId) and (Messages.chatId eq chatId) }) { updateRow ->
+                    updateRow[Messages.status] = "read"
+                }
             }
         }
     }
@@ -196,20 +277,35 @@ class ChatService {
 
         if (chatIdsForUser.isEmpty()) return null
 
-        // Chats that also contain otherUserId
-        val chatIdsForOther = ChatParticipants
-            .select { (ChatParticipants.userId eq otherUserId) and (ChatParticipants.chatId inList chatIdsForUser.toList()) }
-            .map { it[ChatParticipants.chatId] }
-            .toSet()
+        // Chats that are direct and contain both users
+        val candidateDirectChatIds = Chats
+            .select { (Chats.id inList chatIdsForUser.toList()) and (Chats.isDirect eq true) }
+            .map { it[Chats.id] }
 
-        if (chatIdsForOther.isEmpty()) return null
+        candidateDirectChatIds.forEach { chatId ->
+            val participants = ChatParticipants
+                .select { ChatParticipants.chatId eq chatId }
+                .map { it[ChatParticipants.userId] }
+            if (participants.size == 2 && participants.contains(userId) && participants.contains(otherUserId)) {
+                return chatId
+            }
+        }
 
-        val directChat = Chats
-            .select { (Chats.id inList chatIdsForOther.toList()) and (Chats.isDirect eq true) }
-            .limit(1)
-            .firstOrNull()
+        return null
+    }
 
-        return directChat?.get(Chats.id)
+    private fun shouldPromote(currentStatus: String, newStatus: String): Boolean {
+        val current = statusRank[currentStatus] ?: 0
+        val next = statusRank[newStatus] ?: 0
+        return next > current
+    }
+
+    private fun directChatIdFor(userA: String, userB: String): String {
+        val ordered = listOf(userA, userB).sorted()
+        val raw = "${ordered[0]}:${ordered[1]}"
+        val digest = MessageDigest.getInstance("SHA-256").digest(raw.toByteArray(Charsets.UTF_8))
+        val hash = digest.joinToString("") { "%02x".format(it) }
+        return "d_$hash"
     }
 }
 

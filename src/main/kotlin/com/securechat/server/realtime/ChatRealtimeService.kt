@@ -1,5 +1,7 @@
 package com.securechat.server.realtime
 
+import com.securechat.server.dto.CallStateUpdatePush
+import com.securechat.server.dto.IncomingCallPush
 import com.securechat.server.dto.MessageResponse
 import com.securechat.server.dto.MessageStatusPush
 import com.securechat.server.dto.NewMessagePush
@@ -83,6 +85,32 @@ class ChatRealtimeService(
         if (recipients.isEmpty()) return
         val payload = json.encodeToString(event)
         broadcast(recipients, payload)
+    }
+
+    suspend fun pushIncomingCall(
+        recipientUserId: String,
+        event: IncomingCallPush,
+    ) {
+        val payload = json.encodeToString(event)
+        broadcast(listOf(recipientUserId), payload)
+    }
+
+    suspend fun pushCallStateUpdate(
+        recipients: Collection<String>,
+        event: CallStateUpdatePush,
+    ) {
+        if (recipients.isEmpty()) return
+        val payload = json.encodeToString(event)
+        broadcast(recipients, payload)
+    }
+
+    suspend fun filterOnlineUsers(
+        userIds: Collection<String>,
+    ): List<String> = mutex.withLock {
+        userIds.filter { userId ->
+            val sessions = connections[userId]
+            sessions != null && sessions.isNotEmpty()
+        }
     }
 
     private suspend fun broadcast(

@@ -7,6 +7,8 @@ data class ChatSummaryResponse(
     val chatId: String,
     val isDirect: Boolean,
     val createdAt: Long,
+    val peerUserId: String? = null,
+    val peerUsername: String? = null,
 )
 
 @Serializable
@@ -31,15 +33,16 @@ data class DirectChatRequest(
 
 @Serializable
 data class NewMessagePush(
-    val type: String = "message.new",
+    val type: String = "new_message",
     val message: MessageResponse,
 )
 
 @Serializable
 data class MessageStatusPush(
-    val type: String = "message.status",
+    val type: String = "message_status",
     val messageId: String,
     val chatId: String,
     val status: String,
+    val updatedAt: Long,
 )
 
