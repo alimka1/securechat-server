@@ -8,6 +8,7 @@ import com.securechat.server.contact.ContactInviteService
 import com.securechat.server.dto.ChatSummaryResponse
 import com.securechat.server.dto.ContactInviteAcceptRequest
 import com.securechat.server.dto.ContactInviteCreateResponse
+import com.securechat.server.dto.InviteCodeResponse
 import com.securechat.server.models.ErrorResponse
 import io.ktor.http.HttpStatusCode
 import io.ktor.server.application.call
@@ -23,6 +24,30 @@ fun Route.contactInviteRoutes(
     contactInviteService: ContactInviteService,
     chatService: ChatService,
 ) {
+    post("/invites") {
+        val principal = call.principal<JWTPrincipal>()!!
+        val userId = Security.userId(principal)
+
+        try {
+            val invite = contactInviteService.createInvite(userId)
+            call.respond(
+                InviteCodeResponse(
+                    inviteCode = invite.inviteToken,
+                    expiresAt = invite.expiresAt,
+                ),
+            )
+        } catch (e: ContactInviteException) {
+            when (e.error) {
+                ContactInviteError.USER_NOT_FOUND -> {
+                    call.respond(HttpStatusCode.NotFound, ErrorResponse("User not found"))
+                }
+                else -> {
+                    call.respond(HttpStatusCode.InternalServerError, ErrorResponse("Invite creation failed"))
+                }
+            }
+        }
+    }
+
     route("/contacts/invite") {
 
         post("/create") {
