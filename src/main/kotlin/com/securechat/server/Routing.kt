@@ -110,9 +110,6 @@ fun Application.configureRouting(json: Json) {
     val chatRealtimeService = ChatRealtimeService(json)
     val presenceService = PresenceService(chatService, chatRealtimeService)
 
-    // In-memory auth storage: userId -> password
-    val users = mutableMapOf<String, String>()
-
     // One-time invite storage: code -> InviteEntry
     data class InviteEntry(val ownerUserId: String, val expiresAt: Long, var used: Boolean = false)
     val invites = mutableMapOf<String, InviteEntry>()
@@ -131,31 +128,43 @@ fun Application.configureRouting(json: Json) {
                     call.receive<AuthRequest>()
                 } catch (e: Exception) {
                     call.application.log.info("Register attempt: invalid request body")
-                    call.respond(HttpStatusCode.BadRequest, ErrorResponse("Invalid request body. Expected JSON: { userId, password }"))
+                    call.respond(HttpStatusCode.BadRequest, ErrorResponse("Invalid request body. Expected JSON: { username, password }"))
                     return@post
                 }
-                val userId = body.userId.trim()
+                val username = body.username.trim()
                 val password = body.password
-                call.application.log.info("Register attempt: userId=$userId")
-                if (userId.isBlank() || password.isBlank()) {
-                    call.respond(HttpStatusCode.BadRequest, ErrorResponse("userId and password must not be blank"))
+                call.application.log.info("Register attempt: username=$username")
+                if (username.isBlank() || password.isBlank()) {
+                    call.respond(HttpStatusCode.BadRequest, ErrorResponse("username and password must not be blank"))
                     return@post
                 }
-                if (users.containsKey(userId)) {
-                    call.respond(HttpStatusCode.Conflict, ErrorResponse("User already exists"))
+                if (username.length > 64) {
+                    call.respond(HttpStatusCode.BadRequest, ErrorResponse("username is too long"))
                     return@post
                 }
-                users[userId] = password
-                val expiresAt = System.currentTimeMillis() + 24 * 60 * 60 * 1000L
-                val token = JWT.create()
-                    .withAudience(Security.AUD)
-                    .withIssuer(Security.ISS)
-                    .withClaim("userId", userId)
-                    .withExpiresAt(Date(expiresAt))
-                    .sign(Security.algorithm())
-                call.respond(AuthResponse(userId = userId, username = userId, accessToken = token, refreshToken = token, expiresAt = expiresAt))
+                if (password.length < 8) {
+                    call.respond(HttpStatusCode.BadRequest, ErrorResponse("password must be at least 8 characters"))
+                    return@post
+                }
+                val user = authService.register(username = username, password = password)
+                val tokens = authTokenService.generateTokens(userId = user.userId, username = user.username)
+                call.respond(
+                    AuthResponse(
+                        userId = tokens.userId,
+                        username = tokens.username,
+                        accessToken = tokens.accessToken,
+                        refreshToken = tokens.refreshToken,
+                        expiresAt = tokens.expiresAt,
+                    )
+                )
+            } catch (e: IllegalArgumentException) {
+                call.respond(HttpStatusCode.BadRequest, ErrorResponse(e.message ?: "Invalid registration data"))
             } catch (e: Exception) {
-                call.respond(HttpStatusCode.InternalServerError, ErrorResponse("Registration failed"))
+                if (e.message == "Username already exists") {
+                    call.respond(HttpStatusCode.Conflict, ErrorResponse("Username already exists"))
+                } else {
+                    call.respond(HttpStatusCode.InternalServerError, ErrorResponse("Registration failed"))
+                }
             }
         }
 
@@ -165,27 +174,31 @@ fun Application.configureRouting(json: Json) {
                     call.receive<AuthRequest>()
                 } catch (e: Exception) {
                     call.application.log.info("Login attempt: invalid request body")
-                    call.respond(HttpStatusCode.BadRequest, ErrorResponse("Invalid request body. Expected JSON: { userId, password }"))
+                    call.respond(HttpStatusCode.BadRequest, ErrorResponse("Invalid request body. Expected JSON: { username, password }"))
                     return@post
                 }
-                val userId = body.userId.trim()
+                val username = body.username.trim()
                 val password = body.password
-                call.application.log.info("Login attempt: userId=$userId")
-                val storedPassword = users[userId]
-                if (storedPassword == null || storedPassword != password) {
-                    call.respond(HttpStatusCode.Unauthorized, ErrorResponse("Invalid userId or password"))
+                call.application.log.info("Login attempt: username=$username")
+                if (username.isBlank() || password.isBlank()) {
+                    call.respond(HttpStatusCode.BadRequest, ErrorResponse("username and password must not be blank"))
                     return@post
                 }
-                val expiresAt = System.currentTimeMillis() + 24 * 60 * 60 * 1000L
-                val token = JWT.create()
-                    .withAudience(Security.AUD)
-                    .withIssuer(Security.ISS)
-                    .withClaim("userId", userId)
-                    .withExpiresAt(Date(expiresAt))
-                    .sign(Security.algorithm())
-                call.respond(AuthResponse(userId = userId, username = userId, accessToken = token, refreshToken = token, expiresAt = expiresAt))
+                val user = authService.login(username = username, password = password)
+                val tokens = authTokenService.generateTokens(userId = user.userId, username = user.username)
+                call.respond(
+                    AuthResponse(
+                        userId = tokens.userId,
+                        username = tokens.username,
+                        accessToken = tokens.accessToken,
+                        refreshToken = tokens.refreshToken,
+                        expiresAt = tokens.expiresAt,
+                    )
+                )
+            } catch (e: IllegalArgumentException) {
+                call.respond(HttpStatusCode.BadRequest, ErrorResponse(e.message ?: "Invalid login data"))
             } catch (e: Exception) {
-                call.respond(HttpStatusCode.InternalServerError, ErrorResponse("Login failed"))
+                call.respond(HttpStatusCode.Unauthorized, ErrorResponse("Invalid username or password"))
             }
         }
 
