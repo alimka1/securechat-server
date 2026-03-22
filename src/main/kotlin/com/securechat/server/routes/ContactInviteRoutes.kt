@@ -8,7 +8,7 @@ import com.securechat.server.contact.ContactInviteService
 import com.securechat.server.dto.ChatSummaryResponse
 import com.securechat.server.dto.ContactInviteAcceptRequest
 import com.securechat.server.dto.ContactInviteCreateResponse
-import com.securechat.server.dto.InviteCodeResponse
+import com.securechat.server.dto.CreateInviteResponse
 import com.securechat.server.models.ErrorResponse
 import io.ktor.http.HttpStatusCode
 import io.ktor.server.application.call
@@ -31,8 +31,8 @@ fun Route.contactInviteRoutes(
         try {
             val invite = contactInviteService.createInvite(userId)
             call.respond(
-                InviteCodeResponse(
-                    inviteCode = invite.inviteToken,
+                CreateInviteResponse(
+                    token = invite.inviteToken,
                     expiresAt = invite.expiresAt,
                 ),
             )

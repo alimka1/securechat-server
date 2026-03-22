@@ -11,8 +11,8 @@ data class ContactInviteCreateResponse(
 )
 
 @Serializable
-data class InviteCodeResponse(
-    val inviteCode: String,
+data class CreateInviteResponse(
+    val token: String,
     val expiresAt: Long,
 )
 
