@@ -18,6 +18,9 @@ import io.ktor.server.response.respond
 import io.ktor.server.routing.Route
 import io.ktor.server.routing.post
 import io.ktor.server.routing.route
+import org.slf4j.LoggerFactory
+
+private val contactInviteRoutesLog = LoggerFactory.getLogger("ContactInviteRoutes")
 
 fun Route.contactInviteRoutes(
     contactInviteService: ContactInviteService,
@@ -104,7 +107,22 @@ fun Route.contactInviteRoutes(
                     }
                 }
             } catch (e: IllegalArgumentException) {
-                call.respond(HttpStatusCode.NotFound, ErrorResponse("Other user not found"))
+                if (e.message == "Other user not found") {
+                    contactInviteRoutesLog.warn(
+                        "[invite accept] inviter missing in auth_users after accept: inviteToken={} accepterUserId={}",
+                        inviteToken,
+                        accepterUserId,
+                    )
+                    call.respond(
+                        HttpStatusCode.NotFound,
+                        ErrorResponse("Invite owner user not found in database"),
+                    )
+                } else {
+                    call.respond(
+                        HttpStatusCode.NotFound,
+                        ErrorResponse(e.message ?: "Other user not found"),
+                    )
+                }
             }
         }
     }
