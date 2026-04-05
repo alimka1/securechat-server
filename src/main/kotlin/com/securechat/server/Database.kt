@@ -83,6 +83,8 @@ fun initDatabase() {
             ContactInvites,
         )
         migrateMessagesEncryptedColumns()
+        migrateChatIdColumnLengths()
+        migrateInviteTokenColumnLength()
         migrateContactInvitesInviterForeignKey()
     }
     transaction {
@@ -145,6 +147,28 @@ private fun Transaction.migrateMessagesEncryptedColumns() {
         )
     } catch (e: Exception) {
         println("messages column migration (may be no-op): ${e.message}")
+    }
+}
+
+/**
+ * Direct chat ids are generated as "d_" + SHA256 hex, so they exceed 64 chars.
+ * Widen all chat_id carriers to avoid insert/update failures.
+ */
+private fun Transaction.migrateChatIdColumnLengths() {
+    try {
+        exec("ALTER TABLE chats ALTER COLUMN id TYPE VARCHAR(255);")
+        exec("ALTER TABLE chat_participants ALTER COLUMN chat_id TYPE VARCHAR(255);")
+        exec("ALTER TABLE messages ALTER COLUMN chat_id TYPE VARCHAR(255);")
+    } catch (e: Exception) {
+        println("chat_id length migration: ${e.message}")
+    }
+}
+
+private fun Transaction.migrateInviteTokenColumnLength() {
+    try {
+        exec("ALTER TABLE contact_invites ALTER COLUMN invite_token TYPE VARCHAR(255);")
+    } catch (e: Exception) {
+        println("invite_token length migration: ${e.message}")
     }
 }
 

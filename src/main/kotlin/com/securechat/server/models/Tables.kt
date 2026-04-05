@@ -77,14 +77,15 @@ object Profiles : Table("profiles") {
 }
 
 object Chats : Table("chats") {
-    val id = varchar("id", 64)
+    // Direct chat ids use "d_" + 64-char SHA256 hex => 66 chars.
+    val id = varchar("id", 255)
     val isDirect = bool("is_direct").default(true)
     val createdAt = timestamp("created_at").clientDefault { Clock.System.now() }
     override val primaryKey = PrimaryKey(id)
 }
 
 object ChatParticipants : Table("chat_participants") {
-    val chatId = varchar("chat_id", 64).index()
+    val chatId = varchar("chat_id", 255).index()
     val userId = varchar("user_id", 64).index()
     val createdAt = timestamp("created_at").clientDefault { Clock.System.now() }
     override val primaryKey = PrimaryKey(chatId, userId)
@@ -92,7 +93,7 @@ object ChatParticipants : Table("chat_participants") {
 
 object Messages : Table("messages") {
     val id = varchar("id", 64)
-    val chatId = varchar("chat_id", 64).index()
+    val chatId = varchar("chat_id", 255).index()
     val senderId = varchar("sender_id", 64).index()
     /** Opaque ciphertext / base64 payload (never interpreted as plaintext). */
     val content = text("content")
@@ -105,7 +106,7 @@ object Messages : Table("messages") {
 
 /** DB FK: inviter_user_id → auth_users(user_id) ON DELETE CASCADE (applied in Database.kt migration). */
 object ContactInvites : Table("contact_invites") {
-    val inviteToken = varchar("invite_token", 128)
+    val inviteToken = varchar("invite_token", 255)
     val inviterUserId = varchar("inviter_user_id", 64).index()
     val inviterUsername = varchar("inviter_username", 64)
     val expiresAt = long("expires_at")
