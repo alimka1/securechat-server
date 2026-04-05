@@ -8,6 +8,7 @@ import com.securechat.server.dto.DirectChatRequest
 import com.securechat.server.dto.MessageResponse
 import com.securechat.server.dto.SendChatMessageResponse
 import com.securechat.server.dto.SendMessageRequest
+import com.securechat.server.dto.WsChatUpdatedPayload
 import com.securechat.server.models.ErrorResponse
 import com.securechat.server.realtime.ChatRealtimeService
 import io.ktor.http.HttpStatusCode
@@ -33,7 +34,10 @@ fun Route.chatRoutes(
             val response = chats.map {
                 ChatListItemResponse(
                     chatId = it.chatId,
+                    peerUserId = it.peerUserId,
+                    peerUsername = it.peerUsername,
                     participantId = it.peerUserId.orEmpty(),
+                    lastMessagePreview = it.lastMessagePreview,
                     lastMessageAt = it.lastMessageAt,
                     createdAt = it.createdAt,
                 )
@@ -126,6 +130,7 @@ fun Route.chatRoutes(
                 // Sender always gets "sent" once persisted.
                 realtime.pushMessageStatus(
                     recipients = listOf(userId),
+                    chatId = chatId,
                     messageId = msg.messageId,
                     status = "sent",
                 )
@@ -137,8 +142,26 @@ fun Route.chatRoutes(
                     chatService.markMessageDelivered(chatId, msg.messageId, userId)
                     realtime.pushMessageStatus(
                         recipients = participants,
+                        chatId = chatId,
                         messageId = msg.messageId,
                         status = "delivered",
+                    )
+                }
+                val updatedChats = participants.mapNotNull { participantId ->
+                    chatService.listChatsForUser(participantId).firstOrNull { it.chatId == chatId }?.let { summary ->
+                        participantId to summary
+                    }
+                }
+                updatedChats.forEach { (recipientUserId, summary) ->
+                    realtime.pushChatUpdated(
+                        recipients = listOf(recipientUserId),
+                        event = WsChatUpdatedPayload(
+                            chatId = summary.chatId,
+                            peerUserId = summary.peerUserId,
+                            peerUsername = summary.peerUsername,
+                            lastMessagePreview = summary.lastMessagePreview,
+                            lastMessageAt = summary.lastMessageAt,
+                        ),
                     )
                 }
                 val response = SendChatMessageResponse(
@@ -180,6 +203,7 @@ fun Route.chatRoutes(
                 val participants = chatService.listParticipantIds(chatId)
                 realtime.pushMessageStatus(
                     recipients = participants,
+                    chatId = chatId,
                     messageId = messageId,
                     status = "delivered",
                 )
@@ -217,6 +241,7 @@ fun Route.chatRoutes(
                 val participants = chatService.listParticipantIds(chatId)
                 realtime.pushMessageStatus(
                     recipients = participants,
+                    chatId = chatId,
                     messageId = messageId,
                     status = "read",
                 )

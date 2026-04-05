@@ -2,6 +2,7 @@ package com.securechat.server.dto
 
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.json.JsonElement
 
 /**
  * Chat/message HTTP + WS DTOs: opaque [encrypted_payload] only (no plaintext message body).
@@ -22,7 +23,10 @@ data class ChatSummaryResponse(
 @Serializable
 data class ChatListItemResponse(
     @SerialName("chat_id") val chatId: String,
+    @SerialName("peer_user_id") val peerUserId: String? = null,
+    @SerialName("peer_username") val peerUsername: String? = null,
     @SerialName("participant_id") val participantId: String,
+    @SerialName("last_message_preview") val lastMessagePreview: String? = null,
     @SerialName("last_message_at") val lastMessageAt: Long,
     @SerialName("created_at") val createdAt: Long,
 )
@@ -66,7 +70,7 @@ data class DirectChatRequest(
 @Serializable
 data class WsEnvelope(
     val type: String,
-    val payload: String? = null,
+    val payload: JsonElement? = null,
 )
 
 @Serializable
@@ -82,6 +86,23 @@ data class WsIncomingMessagePayload(
 
 @Serializable
 data class WsStatusPayload(
+    val chatId: String? = null,
     val messageId: String,
     val status: String,
+)
+
+@Serializable
+data class WsTypingPayload(
+    val chatId: String,
+    val userId: String,
+    val isTyping: Boolean,
+)
+
+@Serializable
+data class WsChatUpdatedPayload(
+    val chatId: String,
+    val peerUserId: String? = null,
+    val peerUsername: String? = null,
+    val lastMessagePreview: String? = null,
+    val lastMessageAt: Long,
 )

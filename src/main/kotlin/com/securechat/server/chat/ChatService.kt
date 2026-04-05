@@ -27,6 +27,7 @@ data class ChatSummary(
     val createdAt: Long,
     val peerUserId: String? = null,
     val peerUsername: String? = null,
+    val lastMessagePreview: String? = null,
     val lastMessageAt: Long = 0L,
 )
 
@@ -83,9 +84,19 @@ class ChatService {
                 createdAt = row[Chats.createdAt].toJavaInstant().toEpochMilli(),
                 peerUserId = peerUserId,
                 peerUsername = peerUsername,
+                lastMessagePreview = lastMessagePreviewForChat(chatId),
                 lastMessageAt = lastMessageAtForChat(chatId),
             )
         }
+    }
+
+    private fun lastMessagePreviewForChat(chatId: String): String? = transaction {
+        Messages
+            .select { Messages.chatId eq chatId }
+            .orderBy(Messages.createdAt, org.jetbrains.exposed.sql.SortOrder.DESC)
+            .limit(1)
+            .firstOrNull()
+            ?.get(Messages.content)
     }
 
     private fun lastMessageAtForChat(chatId: String): Long = transaction {
@@ -176,6 +187,7 @@ class ChatService {
                     .select { AuthUsers.userId eq otherUserId }
                     .firstOrNull()
                     ?.get(AuthUsers.username),
+                lastMessagePreview = lastMessagePreviewForChat(existingChatId),
                 lastMessageAt = lastMessageAtForChat(existingChatId),
             )
         }
@@ -209,6 +221,7 @@ class ChatService {
                 .select { AuthUsers.userId eq otherUserId }
                 .firstOrNull()
                 ?.get(AuthUsers.username),
+            lastMessagePreview = lastMessagePreviewForChat(chatId),
             lastMessageAt = lastMessageAtForChat(chatId),
         )
     }

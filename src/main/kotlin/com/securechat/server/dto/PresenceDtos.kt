@@ -10,7 +10,7 @@ data class PresenceUpdatePush(
     val lastSeen: Long? = null,
 )
 
-/** Inner payload for WebSocket type "typing" (matches Android TypingUpdateDto). */
+/** Legacy typing DTO kept for backward compatibility (not used by canonical flow). */
 @Serializable
 data class TypingPush(
     val id: String,

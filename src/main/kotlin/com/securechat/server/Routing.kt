@@ -56,7 +56,25 @@ fun Application.configureRouting(json: Json) {
     val chatRealtimeService = ChatRealtimeService(json)
     val presenceService = PresenceService(chatService, chatRealtimeService)
     val callSignalingService = CallSignalingService(chatService, chatRealtimeService)
-    val realtimeCommandService = RealtimeCommandService(json, presenceService, callSignalingService)
+    val realtimeCommandService = RealtimeCommandService(
+        json = json,
+        presenceService = presenceService,
+        callSignalingService = callSignalingService,
+        onMessageStatus = { userId, chatId, messageId, status ->
+            when (status) {
+                "delivered" -> {
+                    chatService.markMessageDelivered(chatId, messageId, userId)
+                    val participants = chatService.listParticipantIds(chatId)
+                    chatRealtimeService.pushMessageStatus(participants, chatId, messageId, "delivered")
+                }
+                "read" -> {
+                    chatService.markMessageRead(chatId, messageId, userId)
+                    val participants = chatService.listParticipantIds(chatId)
+                    chatRealtimeService.pushMessageStatus(participants, chatId, messageId, "read")
+                }
+            }
+        },
+    )
 
     // One-time invite storage: code -> InviteEntry
     data class InviteEntry(val ownerUserId: String, val expiresAt: Long, var used: Boolean = false)

@@ -2,7 +2,7 @@ package com.securechat.server.realtime
 
 import com.securechat.server.chat.ChatService
 import com.securechat.server.dto.PresenceUpdatePush
-import com.securechat.server.dto.TypingPush
+import com.securechat.server.dto.WsTypingPayload
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 
@@ -77,8 +77,9 @@ class PresenceService(
         }
 
         val participants = chatService.listParticipantIds(chatId).filter { it != userId }
-        val event = TypingPush(
-            id = userId,
+        val event = WsTypingPayload(
+            chatId = chatId,
+            userId = userId,
             isTyping = isTyping,
         )
         realtime.pushTyping(participants, event)
