@@ -86,9 +86,11 @@ fun initDatabase() {
         migrateChatIdColumnLengths()
         migrateInviteTokenColumnLength()
         migrateContactInvitesInviterForeignKey()
+        migrateChatAndMessageForeignKeys()
     }
     transaction {
         logOrphanContactInvites()
+        logDuplicateDirectChatPairs()
     }
 }
 
@@ -169,6 +171,126 @@ private fun Transaction.migrateInviteTokenColumnLength() {
         exec("ALTER TABLE contact_invites ALTER COLUMN invite_token TYPE VARCHAR(255);")
     } catch (e: Exception) {
         println("invite_token length migration: ${e.message}")
+    }
+}
+
+/**
+ * Strengthens chat/message referential integrity while preserving valid data.
+ * Cleans orphans first, then applies FK constraints with safe delete semantics.
+ */
+private fun Transaction.migrateChatAndMessageForeignKeys() {
+    try {
+        exec(
+            """
+            DELETE FROM chat_participants cp
+            WHERE NOT EXISTS (SELECT 1 FROM chats c WHERE c.id = cp.chat_id);
+            """.trimIndent(),
+        )
+        exec(
+            """
+            DELETE FROM chat_participants cp
+            WHERE NOT EXISTS (SELECT 1 FROM auth_users au WHERE au.user_id = cp.user_id);
+            """.trimIndent(),
+        )
+        exec(
+            """
+            DELETE FROM messages m
+            WHERE NOT EXISTS (SELECT 1 FROM chats c WHERE c.id = m.chat_id);
+            """.trimIndent(),
+        )
+        exec(
+            """
+            DELETE FROM messages m
+            WHERE NOT EXISTS (SELECT 1 FROM auth_users au WHERE au.user_id = m.sender_id);
+            """.trimIndent(),
+        )
+        exec(
+            """
+            UPDATE messages m
+            SET recipient_id = NULL
+            WHERE recipient_id IS NOT NULL
+              AND NOT EXISTS (SELECT 1 FROM auth_users au WHERE au.user_id = m.recipient_id);
+            """.trimIndent(),
+        )
+
+        exec("ALTER TABLE chat_participants DROP CONSTRAINT IF EXISTS fk_chat_participants_chat;")
+        exec("ALTER TABLE chat_participants DROP CONSTRAINT IF EXISTS fk_chat_participants_user;")
+        exec("ALTER TABLE messages DROP CONSTRAINT IF EXISTS fk_messages_chat;")
+        exec("ALTER TABLE messages DROP CONSTRAINT IF EXISTS fk_messages_sender;")
+        exec("ALTER TABLE messages DROP CONSTRAINT IF EXISTS fk_messages_recipient;")
+
+        exec(
+            """
+            ALTER TABLE chat_participants
+            ADD CONSTRAINT fk_chat_participants_chat
+            FOREIGN KEY (chat_id) REFERENCES chats(id) ON DELETE CASCADE;
+            """.trimIndent(),
+        )
+        exec(
+            """
+            ALTER TABLE chat_participants
+            ADD CONSTRAINT fk_chat_participants_user
+            FOREIGN KEY (user_id) REFERENCES auth_users(user_id) ON DELETE CASCADE;
+            """.trimIndent(),
+        )
+        exec(
+            """
+            ALTER TABLE messages
+            ADD CONSTRAINT fk_messages_chat
+            FOREIGN KEY (chat_id) REFERENCES chats(id) ON DELETE CASCADE;
+            """.trimIndent(),
+        )
+        exec(
+            """
+            ALTER TABLE messages
+            ADD CONSTRAINT fk_messages_sender
+            FOREIGN KEY (sender_id) REFERENCES auth_users(user_id) ON DELETE CASCADE;
+            """.trimIndent(),
+        )
+        exec(
+            """
+            ALTER TABLE messages
+            ADD CONSTRAINT fk_messages_recipient
+            FOREIGN KEY (recipient_id) REFERENCES auth_users(user_id) ON DELETE SET NULL;
+            """.trimIndent(),
+        )
+    } catch (e: Exception) {
+        println("chat/message FK migration: ${e.message}")
+    }
+}
+
+private fun Transaction.logDuplicateDirectChatPairs() {
+    try {
+        exec(
+            """
+            SELECT
+              LEAST(cp1.user_id, cp2.user_id) AS a,
+              GREATEST(cp1.user_id, cp2.user_id) AS b,
+              COUNT(*) AS cnt
+            FROM chats c
+            JOIN chat_participants cp1 ON cp1.chat_id = c.id
+            JOIN chat_participants cp2 ON cp2.chat_id = c.id AND cp1.user_id < cp2.user_id
+            WHERE c.is_direct = TRUE
+            GROUP BY a, b
+            HAVING COUNT(*) > 1;
+            """.trimIndent(),
+        ) { rs: java.sql.ResultSet ->
+            var found = false
+            while (rs.next()) {
+                found = true
+                dbInitLog.warn(
+                    "duplicate direct chat pair detected: userA={} userB={} chats={}",
+                    rs.getString("a"),
+                    rs.getString("b"),
+                    rs.getInt("cnt"),
+                )
+            }
+            if (!found) {
+                dbInitLog.info("duplicate direct chat pair check: none found")
+            }
+        }
+    } catch (e: Exception) {
+        dbInitLog.warn("duplicate direct chat check failed: {}", e.message)
     }
 }
 

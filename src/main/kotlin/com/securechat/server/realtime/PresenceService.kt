@@ -31,6 +31,7 @@ class PresenceService(
 
     suspend fun onDisconnected(userId: String) {
         val now = System.currentTimeMillis()
+        val typingClearedChats = mutableListOf<String>()
         val becameOffline = mutex.withLock {
             val current = connectionCounts[userId] ?: 0
             val offline = when {
@@ -44,10 +45,30 @@ class PresenceService(
                 }
             }
             lastSeen[userId] = now
+
+            typingByChat.forEach { (chatId, typers) ->
+                if (typers.remove(userId)) {
+                    typingClearedChats += chatId
+                }
+            }
+            typingByChat.entries.removeIf { it.value.isEmpty() }
             offline
         }
         if (becameOffline) {
             broadcastPresence(userId, "offline", now)
+        }
+
+        // Ensure stale typing indicators are cleared when a user disconnects.
+        typingClearedChats.forEach { chatId ->
+            val participants = chatService.listParticipantIds(chatId).filter { it != userId }
+            realtime.pushTyping(
+                participants,
+                WsTypingPayload(
+                    chatId = chatId,
+                    userId = userId,
+                    isTyping = false,
+                ),
+            )
         }
     }
 

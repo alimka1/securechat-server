@@ -34,6 +34,7 @@ fun Route.chatRoutes(
             val response = chats.map {
                 ChatListItemResponse(
                     chatId = it.chatId,
+                    isDirect = it.isDirect,
                     peerUserId = it.peerUserId,
                     peerUsername = it.peerUsername,
                     participantId = it.peerUserId.orEmpty(),
@@ -298,6 +299,8 @@ fun Route.chatRoutes(
                     createdAt = chat.createdAt,
                     peerUserId = chat.peerUserId,
                     peerUsername = chat.peerUsername,
+                    lastMessagePreview = chat.lastMessagePreview,
+                    lastMessageAt = chat.lastMessageAt,
                 )
                 call.respond(response)
             } catch (e: IllegalArgumentException) {

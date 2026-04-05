@@ -60,6 +60,7 @@ class ChatRealtimeService(
         val inner = WsIncomingMessagePayload(
             messageId = message.messageId,
             conversationId = message.chatId,
+            chatId = message.chatId,
             senderId = message.senderId,
             recipientId = message.recipientId,
             encryptedPayload = message.encryptedPayload,
@@ -71,6 +72,7 @@ class ChatRealtimeService(
             payload = buildJsonObject {
                 put("messageId", inner.messageId)
                 put("conversationId", inner.conversationId)
+                put("chatId", inner.chatId ?: inner.conversationId)
                 put("senderId", inner.senderId)
                 put("recipientId", inner.recipientId)
                 put("encryptedPayload", inner.encryptedPayload)
@@ -93,6 +95,7 @@ class ChatRealtimeService(
             type = "message_status",
             payload = buildJsonObject {
                 put("chatId", inner.chatId)
+                put("conversationId", inner.chatId)
                 put("messageId", inner.messageId)
                 put("status", inner.status)
             },
@@ -109,6 +112,7 @@ class ChatRealtimeService(
             type = "presence",
             payload = buildJsonObject {
                 put("id", update.id)
+                put("userId", update.id)
                 put("status", update.status)
                 update.lastSeen?.let { put("lastSeen", it) }
             },
@@ -126,6 +130,7 @@ class ChatRealtimeService(
             payload = buildJsonObject {
                 put("chatId", event.chatId)
                 put("userId", event.userId)
+                put("id", event.userId)
                 put("isTyping", event.isTyping)
             },
         )
@@ -143,6 +148,7 @@ class ChatRealtimeService(
                 put("chatId", event.chatId)
                 event.peerUserId?.let { put("peerUserId", it) }
                 event.peerUsername?.let { put("peerUsername", it) }
+                event.peerUserId?.let { put("participantId", it) }
                 event.lastMessagePreview?.let { put("lastMessagePreview", it) }
                 put("lastMessageAt", event.lastMessageAt)
             },
@@ -216,20 +222,36 @@ class ChatRealtimeService(
         recipients: Collection<String>,
         payload: String,
     ) {
-        val targetSessions = mutableListOf<DefaultWebSocketServerSession>()
+        val targetSessions = mutableListOf<Pair<String, DefaultWebSocketServerSession>>()
 
         mutex.withLock {
             recipients.forEach { userId: String ->
                 val sessions: MutableSet<DefaultWebSocketServerSession>? = connections[userId]
                 if (sessions != null) {
-                    targetSessions.addAll(sessions)
+                    targetSessions.addAll(sessions.map { userId to it })
                 }
             }
         }
 
-        targetSessions.forEach { session: DefaultWebSocketServerSession ->
-            runCatching {
+        val failed = mutableListOf<Pair<String, DefaultWebSocketServerSession>>()
+        targetSessions.forEach { (userId, session) ->
+            val ok = runCatching {
                 session.send(Frame.Text(payload))
+            }.isSuccess
+            if (!ok) {
+                failed += userId to session
+            }
+        }
+
+        if (failed.isEmpty()) return
+
+        mutex.withLock {
+            failed.forEach { (userId, session) ->
+                val sessions = connections[userId] ?: return@forEach
+                sessions.remove(session)
+                if (sessions.isEmpty()) {
+                    connections.remove(userId)
+                }
             }
         }
     }

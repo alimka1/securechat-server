@@ -6,7 +6,7 @@ import kotlinx.serialization.json.JsonElement
 
 /**
  * Chat/message HTTP + WS DTOs: opaque [encrypted_payload] only (no plaintext message body).
- * WebSocket: [WsEnvelope] with string [payload] = JSON of inner event.
+ * WebSocket: [WsEnvelope] with object [payload] for inner event data.
  */
 
 /** Invite + POST /chats/direct (camelCase JSON, matches Android invite parser). */
@@ -17,12 +17,15 @@ data class ChatSummaryResponse(
     val createdAt: Long,
     val peerUserId: String? = null,
     val peerUsername: String? = null,
+    val lastMessagePreview: String? = null,
+    val lastMessageAt: Long? = null,
 )
 
 /** GET /chats — matches Android [com.securechat.data.remote.dto.ChatDto] (snake_case). */
 @Serializable
 data class ChatListItemResponse(
     @SerialName("chat_id") val chatId: String,
+    @SerialName("is_direct") val isDirect: Boolean = true,
     @SerialName("peer_user_id") val peerUserId: String? = null,
     @SerialName("peer_username") val peerUsername: String? = null,
     @SerialName("participant_id") val participantId: String,
@@ -77,6 +80,7 @@ data class WsEnvelope(
 data class WsIncomingMessagePayload(
     val messageId: String,
     val conversationId: String,
+    val chatId: String? = null,
     val senderId: String,
     val recipientId: String,
     val encryptedPayload: String,

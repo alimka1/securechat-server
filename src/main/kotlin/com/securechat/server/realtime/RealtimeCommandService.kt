@@ -3,6 +3,8 @@ package com.securechat.server.realtime
 import com.securechat.server.call.CallSignalingService
 import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 
@@ -23,9 +25,12 @@ class RealtimeCommandService(
 
         when (obj["type"]?.jsonPrimitive?.content?.trim().orEmpty()) {
             "typing" -> {
-                val payload = obj["payload"]?.jsonObject
+                val payload = payloadObject(obj)
                 val chatId = payload?.get("chatId")?.jsonPrimitive?.content?.trim().orEmpty()
-                val isTyping = payload?.get("isTyping")?.jsonPrimitive?.booleanOrNull ?: false
+                    .ifBlank { obj["chatId"]?.jsonPrimitive?.content?.trim().orEmpty() }
+                val isTyping = payload?.get("isTyping")?.jsonPrimitive?.booleanOrNull
+                    ?: obj["isTyping"]?.jsonPrimitive?.booleanOrNull
+                    ?: false
                 if (chatId.isNotBlank()) {
                     presenceService.handleTyping(userId, chatId, isTyping)
                 }
@@ -46,10 +51,14 @@ class RealtimeCommandService(
                 // Reserved hook for heartbeat updates.
             }
             "message_status" -> {
-                val payload = obj["payload"]?.jsonObject
+                val payload = payloadObject(obj)
                 val chatId = payload?.get("chatId")?.jsonPrimitive?.content?.trim().orEmpty()
+                    .ifBlank { obj["chatId"]?.jsonPrimitive?.content?.trim().orEmpty() }
                 val messageId = payload?.get("messageId")?.jsonPrimitive?.content?.trim().orEmpty()
-                val status = payload?.get("status")?.jsonPrimitive?.content?.trim().orEmpty().lowercase()
+                    .ifBlank { obj["messageId"]?.jsonPrimitive?.content?.trim().orEmpty() }
+                val status = payload?.get("status")?.jsonPrimitive?.content?.trim().orEmpty()
+                    .ifBlank { obj["status"]?.jsonPrimitive?.content?.trim().orEmpty() }
+                    .lowercase()
                 if (chatId.isNotBlank() && messageId.isNotBlank() && status.isNotBlank()) {
                     onMessageStatus(userId, chatId, messageId, status)
                 }
@@ -96,6 +105,20 @@ class RealtimeCommandService(
                     callSignalingService.relayIce(userId, callId, payload)
                 }
             }
+        }
+    }
+
+    private fun payloadObject(root: JsonObject): JsonObject? {
+        val payload = root["payload"] ?: return null
+        return when (payload) {
+            is JsonObject -> payload
+            is JsonPrimitive ->
+                if (payload.isString) {
+                    runCatching { json.parseToJsonElement(payload.content).jsonObject }.getOrNull()
+                } else {
+                    null
+                }
+            else -> null
         }
     }
 }

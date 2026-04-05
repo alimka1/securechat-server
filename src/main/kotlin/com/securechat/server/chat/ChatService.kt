@@ -57,7 +57,7 @@ class ChatService {
             .orderBy(Chats.createdAt, org.jetbrains.exposed.sql.SortOrder.DESC)
             .toList()
 
-        chatRows.map { row ->
+        val summaries = chatRows.map { row ->
             val chatId = row[Chats.id]
             val isDirect = row[Chats.isDirect]
 
@@ -67,14 +67,12 @@ class ChatService {
                 val participants = ChatParticipants
                     .select { ChatParticipants.chatId eq chatId }
                     .map { it[ChatParticipants.userId] }
-                if (participants.size == 2) {
-                    peerUserId = participants.firstOrNull { it != userId }
-                    if (peerUserId != null) {
-                        peerUsername = AuthUsers
-                            .select { AuthUsers.userId eq peerUserId }
-                            .firstOrNull()
-                            ?.get(AuthUsers.username)
-                    }
+                peerUserId = participants.firstOrNull { it != userId }
+                if (peerUserId != null) {
+                    peerUsername = AuthUsers
+                        .select { AuthUsers.userId eq peerUserId }
+                        .firstOrNull()
+                        ?.get(AuthUsers.username)
                 }
             }
 
@@ -88,6 +86,23 @@ class ChatService {
                 lastMessageAt = lastMessageAtForChat(chatId),
             )
         }
+
+        val dedupedDirectByPeer = linkedMapOf<String, ChatSummary>()
+        val nonDirect = mutableListOf<ChatSummary>()
+        summaries.forEach { summary ->
+            if (summary.isDirect && !summary.peerUserId.isNullOrBlank()) {
+                val key = listOf(userId, summary.peerUserId).sorted().joinToString(":")
+                val existing = dedupedDirectByPeer[key]
+                if (existing == null || summary.isMoreRecentThan(existing)) {
+                    dedupedDirectByPeer[key] = summary
+                }
+            } else {
+                nonDirect += summary
+            }
+        }
+
+        (nonDirect + dedupedDirectByPeer.values)
+            .sortedByDescending { it.lastMessageAt.takeIf { ts -> ts > 0L } ?: it.createdAt }
     }
 
     private fun lastMessagePreviewForChat(chatId: String): String? = transaction {
@@ -332,16 +347,25 @@ class ChatService {
             .select { (Chats.id inList chatIdsForUser.toList()) and (Chats.isDirect eq true) }
             .map { it[Chats.id] }
 
+        val exactMatches = mutableListOf<String>()
         candidateDirectChatIds.forEach { chatId ->
             val participants = ChatParticipants
                 .select { ChatParticipants.chatId eq chatId }
                 .map { it[ChatParticipants.userId] }
             if (participants.size == 2 && participants.contains(userId) && participants.contains(otherUserId)) {
-                return chatId
+                exactMatches += chatId
             }
         }
 
-        return null
+        if (exactMatches.isEmpty()) return null
+
+        val deterministic = directChatIdFor(userId, otherUserId)
+        if (exactMatches.contains(deterministic)) return deterministic
+
+        return exactMatches.maxByOrNull { chatId ->
+            val lastMessageAt = lastMessageAtForChat(chatId)
+            if (lastMessageAt > 0L) lastMessageAt else chatCreatedAtForChat(chatId)
+        }
     }
 
     private fun shouldPromote(currentStatus: String, newStatus: String): Boolean {
@@ -356,6 +380,22 @@ class ChatService {
         val digest = MessageDigest.getInstance("SHA-256").digest(raw.toByteArray(Charsets.UTF_8))
         val hash = digest.joinToString("") { "%02x".format(it) }
         return "d_$hash"
+    }
+
+    private fun chatCreatedAtForChat(chatId: String): Long = transaction {
+        Chats
+            .select { Chats.id eq chatId }
+            .firstOrNull()
+            ?.get(Chats.createdAt)
+            ?.toJavaInstant()
+            ?.toEpochMilli()
+            ?: 0L
+    }
+
+    private fun ChatSummary.isMoreRecentThan(other: ChatSummary): Boolean {
+        val thisScore = this.lastMessageAt.takeIf { it > 0L } ?: this.createdAt
+        val otherScore = other.lastMessageAt.takeIf { it > 0L } ?: other.createdAt
+        return thisScore > otherScore
     }
 }
 

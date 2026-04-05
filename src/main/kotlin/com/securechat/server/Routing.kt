@@ -28,6 +28,7 @@ import io.ktor.server.auth.jwt.*
 import io.ktor.server.request.receive
 import io.ktor.server.request.receiveMultipart
 import io.ktor.server.request.receiveText
+import io.ktor.server.request.path
 import io.ktor.server.response.respond
 import io.ktor.server.response.respondFile
 import io.ktor.server.response.respondText
@@ -89,6 +90,7 @@ fun Application.configureRouting(json: Json) {
         }
 
         post("/register") {
+            call.markLegacyRoute("/auth/register")
             try {
                 val body = try {
                     call.receive<AuthRequest>()
@@ -135,6 +137,7 @@ fun Application.configureRouting(json: Json) {
         }
 
         post("/login") {
+            call.markLegacyRoute("/auth/login")
             try {
                 val body = try {
                     call.receive<AuthRequest>()
@@ -169,6 +172,7 @@ fun Application.configureRouting(json: Json) {
         }
 
         post("/invites/create") {
+            call.markLegacyRoute("/contacts/invite/create")
             try {
                 val body = call.receive<InviteCreateRequest>()
                 val ownerUserId = body.userId.trim()
@@ -187,6 +191,7 @@ fun Application.configureRouting(json: Json) {
         }
 
         post("/invites/consume") {
+            call.markLegacyRoute("/contacts/invite/accept")
             try {
                 val body = call.receive<InviteConsumeRequest>()
                 val code = body.code.trim()
@@ -221,6 +226,7 @@ fun Application.configureRouting(json: Json) {
         // MVP auth: принимает userId в plain text и выдаёт JWT
         // В production заменим на регистрацию + device proof.
         post("/auth") {
+            call.markLegacyRoute("/auth/login")
             val userId = call.receiveText().trim()
             if (userId.isBlank() || userId.length > 64) {
                 call.respond(HttpStatusCode.BadRequest, ErrorResponse("Invalid userId"))
@@ -466,4 +472,10 @@ fun Application.configureRouting(json: Json) {
             }
         }
     }
+}
+
+private fun ApplicationCall.markLegacyRoute(successor: String) {
+    response.headers.append("Deprecation", "true")
+    response.headers.append("Link", "<$successor>; rel=\"successor-version\"")
+    application.log.warn("Legacy route accessed: path={} successor={}", request.path(), successor)
 }

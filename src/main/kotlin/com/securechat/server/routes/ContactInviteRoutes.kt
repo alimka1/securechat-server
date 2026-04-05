@@ -80,6 +80,10 @@ fun Route.contactInviteRoutes(
                         chatId = chat.chatId,
                         isDirect = chat.isDirect,
                         createdAt = chat.createdAt,
+                        peerUserId = chat.peerUserId,
+                        peerUsername = chat.peerUsername,
+                        lastMessagePreview = chat.lastMessagePreview,
+                        lastMessageAt = chat.lastMessageAt,
                     ),
                 )
             } catch (e: ContactInviteException) {
