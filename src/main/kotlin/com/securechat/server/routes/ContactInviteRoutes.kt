@@ -96,6 +96,12 @@ fun Route.contactInviteRoutes(
                     ContactInviteError.USER_NOT_FOUND -> {
                         call.respond(HttpStatusCode.NotFound, ErrorResponse("User not found"))
                     }
+                    ContactInviteError.INVITER_USER_NOT_FOUND -> {
+                        call.respond(
+                            HttpStatusCode.NotFound,
+                            ErrorResponse("Invite owner user not found in database"),
+                        )
+                    }
                 }
             } catch (e: IllegalArgumentException) {
                 call.respond(HttpStatusCode.NotFound, ErrorResponse("Other user not found"))

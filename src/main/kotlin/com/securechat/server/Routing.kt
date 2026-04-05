@@ -3,6 +3,7 @@ package com.securechat.server
 import com.auth0.jwt.JWT
 import com.securechat.server.auth.AuthService
 import com.securechat.server.auth.AuthTokenService
+import com.securechat.server.auth.AuthUserRepository
 import com.securechat.server.backup.AccountBackupService
 import com.securechat.server.call.CallSignalingService
 import com.securechat.server.dto.AuthResponse
@@ -49,7 +50,8 @@ fun Application.configureRouting(json: Json) {
     val authService = AuthService()
     val authTokenService = AuthTokenService()
     val chatService = ChatService()
-    val contactInviteService = ContactInviteService()
+    val authUserRepository = AuthUserRepository()
+    val contactInviteService = ContactInviteService(userRepository = authUserRepository)
     val accountBackupService = AccountBackupService()
     val chatRealtimeService = ChatRealtimeService(json)
     val presenceService = PresenceService(chatService, chatRealtimeService)

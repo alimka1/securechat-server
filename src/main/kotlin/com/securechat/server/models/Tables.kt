@@ -103,6 +103,7 @@ object Messages : Table("messages") {
     override val primaryKey = PrimaryKey(id)
 }
 
+/** DB FK: inviter_user_id → auth_users(user_id) ON DELETE CASCADE (applied in Database.kt migration). */
 object ContactInvites : Table("contact_invites") {
     val inviteToken = varchar("invite_token", 128)
     val inviterUserId = varchar("inviter_user_id", 64).index()

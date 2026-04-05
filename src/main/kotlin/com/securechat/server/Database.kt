@@ -15,12 +15,18 @@ import com.securechat.server.models.Users
 import com.zaxxer.hikari.HikariConfig
 import com.zaxxer.hikari.HikariDataSource
 import org.jetbrains.exposed.sql.Database
+import org.jetbrains.exposed.sql.JoinType
 import org.jetbrains.exposed.sql.SchemaUtils
+import org.jetbrains.exposed.sql.SqlExpressionBuilder.isNull
 import org.jetbrains.exposed.sql.Transaction
+import org.jetbrains.exposed.sql.select
 import org.jetbrains.exposed.sql.transactions.transaction
+import org.slf4j.LoggerFactory
 import java.net.URI
 import java.net.URLDecoder
 import java.nio.charset.StandardCharsets
+
+private val dbInitLog = LoggerFactory.getLogger("SecureChatDatabase")
 
 fun initDatabase() {
     val rawUrl = System.getenv("JDBC_DATABASE_URL")
@@ -77,12 +83,60 @@ fun initDatabase() {
             ContactInvites,
         )
         migrateMessagesEncryptedColumns()
+        migrateContactInvitesInviterForeignKey()
+    }
+    transaction {
+        logOrphanContactInvites()
     }
 }
 
 /**
- * Existing deployments may have [Messages] rows before recipient/ephemeral columns existed.
+ * Enforces referential integrity: contact_invites.inviter_user_id → auth_users(user_id).
+ * PostgreSQL PK column is `user_id`, not `id`.
  */
+private fun Transaction.migrateContactInvitesInviterForeignKey() {
+    try {
+        exec(
+            """
+            DELETE FROM contact_invites ci
+            WHERE NOT EXISTS (SELECT 1 FROM auth_users au WHERE au.user_id = ci.inviter_user_id);
+            """.trimIndent(),
+        )
+        exec("ALTER TABLE contact_invites DROP CONSTRAINT IF EXISTS fk_contact_invites_inviter_user;")
+        exec(
+            """
+            ALTER TABLE contact_invites
+            ADD CONSTRAINT fk_contact_invites_inviter_user
+            FOREIGN KEY (inviter_user_id) REFERENCES auth_users(user_id) ON DELETE CASCADE;
+            """.trimIndent(),
+        )
+    } catch (e: Exception) {
+        println("contact_invites FK migration: ${e.message}")
+    }
+}
+
+private fun logOrphanContactInvites() {
+    try {
+        val rows = ContactInvites
+            .join(AuthUsers, JoinType.LEFT, ContactInvites.inviterUserId, AuthUsers.userId)
+            .select { AuthUsers.userId.isNull() }
+            .toList()
+        dbInitLog.warn(
+            "contact_invites orphan rows (no auth_users match): count={}",
+            rows.size,
+        )
+        rows.forEach { row ->
+            dbInitLog.warn(
+                "  orphan invite_token={} inviter_user_id={}",
+                row[ContactInvites.inviteToken],
+                row[ContactInvites.inviterUserId],
+            )
+        }
+    } catch (e: Exception) {
+        dbInitLog.warn("contact_invites orphan check failed: {}", e.message)
+    }
+}
+
 private fun Transaction.migrateMessagesEncryptedColumns() {
     try {
         exec("ALTER TABLE messages ADD COLUMN IF NOT EXISTS recipient_id VARCHAR(64);")

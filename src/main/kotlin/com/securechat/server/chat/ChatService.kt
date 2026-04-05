@@ -15,8 +15,11 @@ import org.jetbrains.exposed.sql.select
 import org.jetbrains.exposed.sql.transactions.transaction
 import org.jetbrains.exposed.sql.update
 import org.jetbrains.exposed.sql.SqlExpressionBuilder.inList
+import org.slf4j.LoggerFactory
 import java.security.MessageDigest
 import java.util.UUID
+
+private val chatServiceLog = LoggerFactory.getLogger(ChatService::class.java)
 
 data class ChatSummary(
     val chatId: String,
@@ -145,11 +148,18 @@ class ChatService {
         userId: String,
         otherUserId: String,
     ): ChatSummary = transaction {
-        // ensure other user exists
+        // ensure other user exists (auth_users — registered accounts only)
         val otherExists = AuthUsers
             .select { AuthUsers.userId eq otherUserId }
             .any()
-        require(otherExists) { "Other user not found" }
+        if (!otherExists) {
+            chatServiceLog.warn(
+                "[getOrCreateDirectChat] other user not in auth_users: userId={} otherUserId={}",
+                userId,
+                otherUserId,
+            )
+            require(false) { "Other user not found" }
+        }
 
         // find existing direct chat with exactly these two participants
         val existingChatId = findDirectChatId(userId, otherUserId)
