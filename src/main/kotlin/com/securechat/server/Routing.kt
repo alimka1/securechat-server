@@ -40,69 +40,8 @@ import java.io.File
 import java.util.Date
 import java.util.UUID
 import kotlinx.serialization.json.Json
-import java.util.concurrent.ConcurrentHashMap
-private suspend fun handleWsSession(
-    userId: String,
-    session: DefaultWebSocketServerSession,
-    connections: ConcurrentHashMap<String, DefaultWebSocketServerSession>,
-    json: Json,
-    log: (String) -> Unit
-) {
-    connections[userId] = session
-    log("WebSocket connect: userId=$userId")
-
-    try {
-        for (frame in session.incoming) {
-            try {
-                if (frame is Frame.Text) {
-                    val raw = frame.readText()
-
-                    val msg = runCatching { json.decodeFromString(SignalMessage.serializer(), raw) }.getOrNull()
-                        ?: continue
-
-                    val to = msg.to?.trim().orEmpty()
-                    if (to.isBlank()) {
-                        log("Signal: msg.to is blank, ignoring")
-                        continue
-                    }
-
-                    log("IN from=$userId to=$to type=${msg.type} payloadLen=${msg.payload.length}")
-
-                    val targetSession = connections[to]
-                    if (targetSession == null) {
-                        log("DROP target_not_connected to=$to")
-                        continue
-                    }
-
-                    try {
-                        targetSession.send(
-                            Frame.Text(
-                                json.encodeToString(
-                                    SignalMessage.serializer(),
-                                    msg.copy(from = userId)
-                                )
-                            )
-                        )
-                        log("OUT to=$to ok")
-                    } catch (e: Exception) {
-                        log("WS send failed to=$to reason=${e.message}")
-                        connections.remove(to)
-                    }
-                }
-            } catch (e: Exception) {
-                log("WS frame error: ${e.message}")
-            }
-        }
-    } finally {
-        connections.remove(userId)
-        log("WebSocket disconnect: userId=$userId")
-    }
-}
 
 fun Application.configureRouting(json: Json) {
-
-    // WebSocket connections per userId
-    val connections = ConcurrentHashMap<String, DefaultWebSocketServerSession>()
 
     // Backup directory
     val backupDir = File("backups").apply { mkdirs() }
@@ -284,41 +223,6 @@ fun Application.configureRouting(json: Json) {
                 .sign(Security.algorithm())
 
             call.respond(AuthResponse(userId = userId, username = userId, accessToken = token, refreshToken = token, expiresAt = expiresAt))
-        }
-
-        // --- WebSocket alias for Android client: /ws?token=token_<userId> ---
-        webSocket("/ws") {
-            val token = call.request.queryParameters["token"]
-            if (token.isNullOrBlank() || !token.startsWith("token_")) {
-                close(CloseReason(CloseReason.Codes.VIOLATED_POLICY, "Invalid or missing token"))
-                return@webSocket
-            }
-            val userId = token.removePrefix("token_").trim()
-            if (userId.isBlank()) {
-                close(CloseReason(CloseReason.Codes.VIOLATED_POLICY, "Invalid token"))
-                return@webSocket
-            }
-            handleWsSession(userId, this, connections, json) { call.application.log.info(it) }
-        }
-
-        // --- WebRTC Signaling: /signal/{userId}?token=token_<userId> (path userId must match token) ---
-        webSocket("/signal/{userId}") {
-            val token = call.request.queryParameters["token"]
-            if (token.isNullOrBlank() || !token.startsWith("token_")) {
-                close(CloseReason(CloseReason.Codes.VIOLATED_POLICY, "Invalid or missing token"))
-                return@webSocket
-            }
-            val userId = token.removePrefix("token_").trim()
-            if (userId.isBlank()) {
-                close(CloseReason(CloseReason.Codes.VIOLATED_POLICY, "Invalid token"))
-                return@webSocket
-            }
-            val pathUserId = call.parameters["userId"]
-            if (pathUserId != null && pathUserId != userId) {
-                close(CloseReason(CloseReason.Codes.VIOLATED_POLICY, "userId mismatch"))
-                return@webSocket
-            }
-            handleWsSession(userId, this, connections, json) { call.application.log.info(it) }
         }
 
         authenticate("auth-jwt") {

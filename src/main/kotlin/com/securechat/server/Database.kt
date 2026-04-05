@@ -16,6 +16,7 @@ import com.zaxxer.hikari.HikariConfig
 import com.zaxxer.hikari.HikariDataSource
 import org.jetbrains.exposed.sql.Database
 import org.jetbrains.exposed.sql.SchemaUtils
+import org.jetbrains.exposed.sql.Transaction
 import org.jetbrains.exposed.sql.transactions.transaction
 import java.net.URI
 import java.net.URLDecoder
@@ -75,6 +76,21 @@ fun initDatabase() {
             Messages,
             ContactInvites,
         )
+        migrateMessagesEncryptedColumns()
+    }
+}
+
+/**
+ * Existing deployments may have [Messages] rows before recipient/ephemeral columns existed.
+ */
+private fun Transaction.migrateMessagesEncryptedColumns() {
+    try {
+        exec("ALTER TABLE messages ADD COLUMN IF NOT EXISTS recipient_id VARCHAR(64);")
+        exec(
+            "ALTER TABLE messages ADD COLUMN IF NOT EXISTS ephemeral_key_id VARCHAR(128) NOT NULL DEFAULT '';",
+        )
+    } catch (e: Exception) {
+        println("messages column migration (may be no-op): ${e.message}")
     }
 }
 

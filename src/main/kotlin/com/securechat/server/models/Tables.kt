@@ -94,7 +94,10 @@ object Messages : Table("messages") {
     val id = varchar("id", 64)
     val chatId = varchar("chat_id", 64).index()
     val senderId = varchar("sender_id", 64).index()
+    /** Opaque ciphertext / base64 payload (never interpreted as plaintext). */
     val content = text("content")
+    val recipientId = varchar("recipient_id", 64).nullable()
+    val ephemeralKeyId = varchar("ephemeral_key_id", 128).default("")
     val status = varchar("status", 32).default("sent") // sending | sent | delivered | read
     val createdAt = timestamp("created_at").clientDefault { Clock.System.now() }
     override val primaryKey = PrimaryKey(id)

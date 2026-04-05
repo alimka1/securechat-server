@@ -24,13 +24,16 @@ data class ChatSummary(
     val createdAt: Long,
     val peerUserId: String? = null,
     val peerUsername: String? = null,
+    val lastMessageAt: Long = 0L,
 )
 
 data class ChatMessage(
     val messageId: String,
     val chatId: String,
     val senderId: String,
-    val content: String,
+    val recipientId: String,
+    val encryptedPayload: String,
+    val ephemeralKeyId: String,
     val createdAt: Long,
     val status: String,
 )
@@ -77,8 +80,16 @@ class ChatService {
                 createdAt = row[Chats.createdAt].toJavaInstant().toEpochMilli(),
                 peerUserId = peerUserId,
                 peerUsername = peerUsername,
+                lastMessageAt = lastMessageAtForChat(chatId),
             )
         }
+    }
+
+    private fun lastMessageAtForChat(chatId: String): Long = transaction {
+        Messages
+            .select { Messages.chatId eq chatId }
+            .map { it[Messages.createdAt].toJavaInstant().toEpochMilli() }
+            .maxOrNull() ?: 0L
     }
 
     fun getMessagesForChat(
@@ -99,16 +110,28 @@ class ChatService {
     fun sendMessage(
         chatId: String,
         senderId: String,
-        content: String,
+        recipientId: String?,
+        encryptedPayload: String,
+        ephemeralKeyId: String,
     ): ChatMessage = transaction {
         ensureParticipant(chatId, senderId)
+
+        val resolvedRecipient = recipientId?.trim().orEmpty().ifBlank {
+            val others = ChatParticipants
+                .select { ChatParticipants.chatId eq chatId }
+                .map { it[ChatParticipants.userId] }
+                .filter { it != senderId }
+            if (others.size == 1) others.first() else ""
+        }
 
         val id = UUID.randomUUID().toString()
         Messages.insert {
             it[Messages.id] = id
             it[Messages.chatId] = chatId
             it[Messages.senderId] = senderId
-            it[Messages.content] = content
+            it[Messages.content] = encryptedPayload
+            it[Messages.recipientId] = if (resolvedRecipient.isBlank()) null else resolvedRecipient
+            it[Messages.ephemeralKeyId] = ephemeralKeyId
             it[Messages.status] = "sent"
         }
 
@@ -143,6 +166,7 @@ class ChatService {
                     .select { AuthUsers.userId eq otherUserId }
                     .firstOrNull()
                     ?.get(AuthUsers.username),
+                lastMessageAt = lastMessageAtForChat(existingChatId),
             )
         }
 
@@ -175,6 +199,7 @@ class ChatService {
                 .select { AuthUsers.userId eq otherUserId }
                 .firstOrNull()
                 ?.get(AuthUsers.username),
+            lastMessageAt = lastMessageAtForChat(chatId),
         )
     }
 
@@ -263,7 +288,9 @@ class ChatService {
             messageId = this[Messages.id],
             chatId = this[Messages.chatId],
             senderId = this[Messages.senderId],
-            content = this[Messages.content],
+            recipientId = this[Messages.recipientId].orEmpty(),
+            encryptedPayload = this[Messages.content],
+            ephemeralKeyId = this[Messages.ephemeralKeyId],
             createdAt = this[Messages.createdAt].toJavaInstant().toEpochMilli(),
             status = this[Messages.status],
         )

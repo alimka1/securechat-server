@@ -2,10 +2,11 @@ package com.securechat.server.routes
 
 import com.securechat.server.Security
 import com.securechat.server.chat.ChatService
+import com.securechat.server.dto.ChatListItemResponse
 import com.securechat.server.dto.ChatSummaryResponse
 import com.securechat.server.dto.DirectChatRequest
 import com.securechat.server.dto.MessageResponse
-import com.securechat.server.dto.MessageStatusPush
+import com.securechat.server.dto.SendChatMessageResponse
 import com.securechat.server.dto.SendMessageRequest
 import com.securechat.server.models.ErrorResponse
 import com.securechat.server.realtime.ChatRealtimeService
@@ -30,12 +31,11 @@ fun Route.chatRoutes(
 
             val chats = chatService.listChatsForUser(userId)
             val response = chats.map {
-                ChatSummaryResponse(
+                ChatListItemResponse(
                     chatId = it.chatId,
-                    isDirect = it.isDirect,
+                    participantId = it.peerUserId.orEmpty(),
+                    lastMessageAt = it.lastMessageAt,
                     createdAt = it.createdAt,
-                    peerUserId = it.peerUserId,
-                    peerUsername = it.peerUsername,
                 )
             }
             call.respond(response)
@@ -63,8 +63,10 @@ fun Route.chatRoutes(
                         messageId = it.messageId,
                         chatId = it.chatId,
                         senderId = it.senderId,
-                        content = it.content,
-                        createdAt = it.createdAt,
+                        recipientId = it.recipientId,
+                        encryptedPayload = it.encryptedPayload,
+                        ephemeralKeyId = it.ephemeralKeyId,
+                        timestamp = it.createdAt,
                         status = it.status,
                     )
                 }
@@ -95,42 +97,37 @@ fun Route.chatRoutes(
             } catch (e: Exception) {
                 call.respond(
                     HttpStatusCode.BadRequest,
-                    ErrorResponse("Invalid request body. Expected JSON: { content }"),
+                    ErrorResponse("Invalid request body. Expected JSON: { encrypted_payload, ephemeral_key_id?, recipient_id? }"),
                 )
                 return@post
             }
 
-            val content = body.content.trim()
-            if (content.isBlank()) {
+            // Do not trim ciphertext: opaque E2E payloads must be stored byte-for-byte.
+            val encryptedPayload = body.encryptedPayload
+            if (encryptedPayload.isBlank()) {
                 call.respond(
                     HttpStatusCode.BadRequest,
-                    ErrorResponse("content must not be blank"),
+                    ErrorResponse("encrypted_payload must not be blank"),
                 )
                 return@post
             }
 
             try {
-                val msg = chatService.sendMessage(chatId, userId, content)
-                val response = MessageResponse(
-                    messageId = msg.messageId,
-                    chatId = msg.chatId,
-                    senderId = msg.senderId,
-                    content = msg.content,
-                    createdAt = msg.createdAt,
-                    status = msg.status,
+                val msg = chatService.sendMessage(
+                    chatId = chatId,
+                    senderId = userId,
+                    recipientId = body.recipientId,
+                    encryptedPayload = encryptedPayload,
+                    ephemeralKeyId = body.ephemeralKeyId.trim(),
                 )
                 val participants = chatService.listParticipantIds(chatId)
-                realtime.pushNewMessage(participants, response)
+                realtime.pushNewMessage(participants, msg)
 
                 // Sender always gets "sent" once persisted.
                 realtime.pushMessageStatus(
                     recipients = listOf(userId),
-                    status = MessageStatusPush(
-                        messageId = msg.messageId,
-                        chatId = chatId,
-                        status = "sent",
-                        updatedAt = System.currentTimeMillis(),
-                    ),
+                    messageId = msg.messageId,
+                    status = "sent",
                 )
 
                 // If at least one non-sender participant is online, promote to delivered.
@@ -140,14 +137,15 @@ fun Route.chatRoutes(
                     chatService.markMessageDelivered(chatId, msg.messageId, userId)
                     realtime.pushMessageStatus(
                         recipients = participants,
-                        status = MessageStatusPush(
-                            messageId = msg.messageId,
-                            chatId = chatId,
-                            status = "delivered",
-                            updatedAt = System.currentTimeMillis(),
-                        ),
+                        messageId = msg.messageId,
+                        status = "delivered",
                     )
                 }
+                val response = SendChatMessageResponse(
+                    messageId = msg.messageId,
+                    createdAt = msg.createdAt,
+                    deliveredAt = if (onlineRecipients.isNotEmpty()) msg.createdAt else null,
+                )
                 call.respond(HttpStatusCode.Created, response)
             } catch (e: IllegalAccessException) {
                 call.respond(
@@ -180,13 +178,11 @@ fun Route.chatRoutes(
             try {
                 chatService.markMessageDelivered(chatId, messageId, userId)
                 val participants = chatService.listParticipantIds(chatId)
-                val statusEvent = MessageStatusPush(
+                realtime.pushMessageStatus(
+                    recipients = participants,
                     messageId = messageId,
-                    chatId = chatId,
                     status = "delivered",
-                    updatedAt = System.currentTimeMillis(),
                 )
-                realtime.pushMessageStatus(participants, statusEvent)
                 call.respond(HttpStatusCode.NoContent, Unit)
             } catch (e: IllegalAccessException) {
                 call.respond(
@@ -219,13 +215,11 @@ fun Route.chatRoutes(
             try {
                 chatService.markMessageRead(chatId, messageId, userId)
                 val participants = chatService.listParticipantIds(chatId)
-                val statusEvent = MessageStatusPush(
+                realtime.pushMessageStatus(
+                    recipients = participants,
                     messageId = messageId,
-                    chatId = chatId,
                     status = "read",
-                    updatedAt = System.currentTimeMillis(),
                 )
-                realtime.pushMessageStatus(participants, statusEvent)
                 call.respond(HttpStatusCode.NoContent, Unit)
             } catch (e: IllegalAccessException) {
                 call.respond(

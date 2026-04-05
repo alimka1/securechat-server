@@ -1,12 +1,14 @@
 package com.securechat.server.realtime
 
+import com.securechat.server.chat.ChatMessage
+import com.securechat.server.dto.CallSignalWsPayload
 import com.securechat.server.dto.CallStateUpdatePush
 import com.securechat.server.dto.IncomingCallPush
-import com.securechat.server.dto.MessageResponse
-import com.securechat.server.dto.MessageStatusPush
-import com.securechat.server.dto.NewMessagePush
 import com.securechat.server.dto.PresenceUpdatePush
 import com.securechat.server.dto.TypingPush
+import com.securechat.server.dto.WsEnvelope
+import com.securechat.server.dto.WsIncomingMessagePayload
+import com.securechat.server.dto.WsStatusPayload
 import io.ktor.server.websocket.DefaultWebSocketServerSession
 import io.ktor.websocket.Frame
 import kotlinx.coroutines.sync.Mutex
@@ -49,24 +51,37 @@ class ChatRealtimeService(
 
     suspend fun pushNewMessage(
         recipients: Collection<String>,
-        message: MessageResponse,
+        message: ChatMessage,
     ) {
         if (recipients.isEmpty()) return
-        val payload = json.encodeToString(
-            NewMessagePush(
-                message = message,
-            ),
+        val inner = WsIncomingMessagePayload(
+            messageId = message.messageId,
+            conversationId = message.chatId,
+            senderId = message.senderId,
+            recipientId = message.recipientId,
+            encryptedPayload = message.encryptedPayload,
+            ephemeralKeyId = message.ephemeralKeyId,
+            timestamp = message.createdAt,
         )
-        broadcast(recipients, payload)
+        val envelope = WsEnvelope(
+            type = "message",
+            payload = json.encodeToString(WsIncomingMessagePayload.serializer(), inner),
+        )
+        broadcast(recipients, json.encodeToString(WsEnvelope.serializer(), envelope))
     }
 
     suspend fun pushMessageStatus(
         recipients: Collection<String>,
-        status: MessageStatusPush,
+        messageId: String,
+        status: String,
     ) {
         if (recipients.isEmpty()) return
-        val payload = json.encodeToString(status)
-        broadcast(recipients, payload)
+        val inner = WsStatusPayload(messageId = messageId, status = status)
+        val envelope = WsEnvelope(
+            type = "status",
+            payload = json.encodeToString(WsStatusPayload.serializer(), inner),
+        )
+        broadcast(recipients, json.encodeToString(WsEnvelope.serializer(), envelope))
     }
 
     suspend fun pushPresenceUpdate(
@@ -74,8 +89,11 @@ class ChatRealtimeService(
         update: PresenceUpdatePush,
     ) {
         if (recipients.isEmpty()) return
-        val payload = json.encodeToString(update)
-        broadcast(recipients, payload)
+        val envelope = WsEnvelope(
+            type = "presence",
+            payload = json.encodeToString(PresenceUpdatePush.serializer(), update),
+        )
+        broadcast(recipients, json.encodeToString(WsEnvelope.serializer(), envelope))
     }
 
     suspend fun pushTyping(
@@ -83,16 +101,30 @@ class ChatRealtimeService(
         event: TypingPush,
     ) {
         if (recipients.isEmpty()) return
-        val payload = json.encodeToString(event)
-        broadcast(recipients, payload)
+        val envelope = WsEnvelope(
+            type = "typing",
+            payload = json.encodeToString(TypingPush.serializer(), event),
+        )
+        broadcast(recipients, json.encodeToString(WsEnvelope.serializer(), envelope))
     }
 
     suspend fun pushIncomingCall(
         recipientUserId: String,
         event: IncomingCallPush,
     ) {
-        val payload = json.encodeToString(event)
-        broadcast(listOf(recipientUserId), payload)
+        val inner = CallSignalWsPayload(
+            callId = event.callId,
+            fromUserId = event.fromUserId,
+            fromDisplayName = null,
+            toUserId = null,
+            type = "REQUEST",
+            timestamp = event.createdAt,
+        )
+        val envelope = WsEnvelope(
+            type = "call",
+            payload = json.encodeToString(CallSignalWsPayload.serializer(), inner),
+        )
+        broadcast(listOf(recipientUserId), json.encodeToString(WsEnvelope.serializer(), envelope))
     }
 
     suspend fun pushCallStateUpdate(
@@ -100,8 +132,19 @@ class ChatRealtimeService(
         event: CallStateUpdatePush,
     ) {
         if (recipients.isEmpty()) return
-        val payload = json.encodeToString(event)
-        broadcast(recipients, payload)
+        val inner = CallSignalWsPayload(
+            callId = event.callId,
+            fromUserId = event.actorUserId,
+            fromDisplayName = null,
+            toUserId = event.targetUserId,
+            type = event.state,
+            timestamp = event.updatedAt,
+        )
+        val envelope = WsEnvelope(
+            type = "call",
+            payload = json.encodeToString(CallSignalWsPayload.serializer(), inner),
+        )
+        broadcast(recipients, json.encodeToString(WsEnvelope.serializer(), envelope))
     }
 
     suspend fun filterOnlineUsers(

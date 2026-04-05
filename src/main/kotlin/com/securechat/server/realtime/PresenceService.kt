@@ -78,8 +78,7 @@ class PresenceService(
 
         val participants = chatService.listParticipantIds(chatId).filter { it != userId }
         val event = TypingPush(
-            chatId = chatId,
-            userId = userId,
+            id = userId,
             isTyping = isTyping,
         )
         realtime.pushTyping(participants, event)
@@ -94,7 +93,7 @@ class PresenceService(
         if (contacts.isEmpty()) return
 
         val update = PresenceUpdatePush(
-            userId = userId,
+            id = userId,
             status = status,
             lastSeen = lastSeenAt,
         )

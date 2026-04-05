@@ -23,3 +23,14 @@ data class CallStateUpdatePush(
     val updatedAt: Long,
 )
 
+/** WebSocket inner payload for type "call" / call_signal (matches Android CallSignalDto). */
+@Serializable
+data class CallSignalWsPayload(
+    val callId: String,
+    val fromUserId: String,
+    val fromDisplayName: String? = null,
+    val toUserId: String? = null,
+    val type: String,
+    val timestamp: Long,
+)
+
