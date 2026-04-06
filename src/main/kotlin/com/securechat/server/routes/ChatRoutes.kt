@@ -66,12 +66,13 @@ fun Route.chatRoutes(
                 val response = messages.map {
                     MessageResponse(
                         messageId = it.messageId,
+                        clientMessageId = it.clientMessageId,
                         chatId = it.chatId,
                         senderId = it.senderId,
                         recipientId = it.recipientId,
                         encryptedPayload = it.encryptedPayload,
                         ephemeralKeyId = it.ephemeralKeyId,
-                        timestamp = it.createdAt,
+                        createdAt = it.createdAt,
                         status = it.status,
                     )
                 }
@@ -102,7 +103,7 @@ fun Route.chatRoutes(
             } catch (e: Exception) {
                 call.respond(
                     HttpStatusCode.BadRequest,
-                    ErrorResponse("Invalid request body. Expected JSON: { encrypted_payload, ephemeral_key_id?, recipient_id? }"),
+                    ErrorResponse("Invalid request body. Expected JSON: { encryptedPayload, ephemeralKeyId?, recipientId?, clientMessageId? }"),
                 )
                 return@post
             }
@@ -112,7 +113,7 @@ fun Route.chatRoutes(
             if (encryptedPayload.isBlank()) {
                 call.respond(
                     HttpStatusCode.BadRequest,
-                    ErrorResponse("encrypted_payload must not be blank"),
+                    ErrorResponse("encryptedPayload must not be blank"),
                 )
                 return@post
             }
@@ -122,6 +123,7 @@ fun Route.chatRoutes(
                     chatId = chatId,
                     senderId = userId,
                     recipientId = body.recipientId,
+                    clientMessageId = body.clientMessageId,
                     encryptedPayload = encryptedPayload,
                     ephemeralKeyId = body.ephemeralKeyId.trim(),
                 )
@@ -133,6 +135,7 @@ fun Route.chatRoutes(
                     recipients = listOf(userId),
                     chatId = chatId,
                     messageId = msg.messageId,
+                    clientMessageId = msg.clientMessageId,
                     status = "sent",
                 )
 
@@ -145,6 +148,7 @@ fun Route.chatRoutes(
                         recipients = participants,
                         chatId = chatId,
                         messageId = msg.messageId,
+                        clientMessageId = msg.clientMessageId,
                         status = "delivered",
                     )
                 }
@@ -167,8 +171,11 @@ fun Route.chatRoutes(
                 }
                 val response = SendChatMessageResponse(
                     messageId = msg.messageId,
+                    chatId = msg.chatId,
+                    senderId = msg.senderId,
                     createdAt = msg.createdAt,
-                    deliveredAt = if (onlineRecipients.isNotEmpty()) msg.createdAt else null,
+                    status = msg.status,
+                    clientMessageId = msg.clientMessageId ?: msg.messageId,
                 )
                 call.respond(HttpStatusCode.Created, response)
             } catch (e: IllegalAccessException) {
@@ -201,11 +208,13 @@ fun Route.chatRoutes(
 
             try {
                 chatService.markMessageDelivered(chatId, messageId, userId)
+                val message = chatService.getMessageById(chatId, messageId)
                 val participants = chatService.listParticipantIds(chatId)
                 realtime.pushMessageStatus(
                     recipients = participants,
                     chatId = chatId,
                     messageId = messageId,
+                    clientMessageId = message?.clientMessageId,
                     status = "delivered",
                 )
                 call.respond(HttpStatusCode.NoContent, Unit)
@@ -239,11 +248,13 @@ fun Route.chatRoutes(
 
             try {
                 chatService.markMessageRead(chatId, messageId, userId)
+                val message = chatService.getMessageById(chatId, messageId)
                 val participants = chatService.listParticipantIds(chatId)
                 realtime.pushMessageStatus(
                     recipients = participants,
                     chatId = chatId,
                     messageId = messageId,
+                    clientMessageId = message?.clientMessageId,
                     status = "read",
                 )
                 call.respond(HttpStatusCode.NoContent, Unit)

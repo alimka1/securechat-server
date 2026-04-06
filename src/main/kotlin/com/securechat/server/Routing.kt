@@ -66,12 +66,26 @@ fun Application.configureRouting(json: Json) {
                 "delivered" -> {
                     chatService.markMessageDelivered(chatId, messageId, userId)
                     val participants = chatService.listParticipantIds(chatId)
-                    chatRealtimeService.pushMessageStatus(participants, chatId, messageId, "delivered")
+                    val message = chatService.getMessageById(chatId, messageId)
+                    chatRealtimeService.pushMessageStatus(
+                        recipients = participants,
+                        chatId = chatId,
+                        messageId = messageId,
+                        clientMessageId = message?.clientMessageId,
+                        status = "delivered",
+                    )
                 }
                 "read" -> {
                     chatService.markMessageRead(chatId, messageId, userId)
                     val participants = chatService.listParticipantIds(chatId)
-                    chatRealtimeService.pushMessageStatus(participants, chatId, messageId, "read")
+                    val message = chatService.getMessageById(chatId, messageId)
+                    chatRealtimeService.pushMessageStatus(
+                        recipients = participants,
+                        chatId = chatId,
+                        messageId = messageId,
+                        clientMessageId = message?.clientMessageId,
+                        status = "read",
+                    )
                 }
             }
         },

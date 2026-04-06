@@ -83,6 +83,7 @@ fun initDatabase() {
             ContactInvites,
         )
         migrateMessagesEncryptedColumns()
+        migrateMessageClientMessageIdColumn()
         migrateChatIdColumnLengths()
         migrateInviteTokenColumnLength()
         migrateContactInvitesInviterForeignKey()
@@ -149,6 +150,15 @@ private fun Transaction.migrateMessagesEncryptedColumns() {
         )
     } catch (e: Exception) {
         println("messages column migration (may be no-op): ${e.message}")
+    }
+}
+
+private fun Transaction.migrateMessageClientMessageIdColumn() {
+    try {
+        exec("ALTER TABLE messages ADD COLUMN IF NOT EXISTS client_message_id VARCHAR(64);")
+        exec("CREATE INDEX IF NOT EXISTS idx_messages_client_message_id ON messages(client_message_id);")
+    } catch (e: Exception) {
+        println("messages client_message_id migration (may be no-op): ${e.message}")
     }
 }
 

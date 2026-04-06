@@ -2,10 +2,12 @@ package com.securechat.server.dto
 
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.ExperimentalSerializationApi
 import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonNames
 
 /**
- * Chat/message HTTP + WS DTOs: opaque [encrypted_payload] only (no plaintext message body).
+ * Chat/message HTTP + WS DTOs: opaque [encryptedPayload] only (no plaintext message body).
  * WebSocket: [WsEnvelope] with object [payload] for inner event data.
  */
 
@@ -35,32 +37,39 @@ data class ChatListItemResponse(
 )
 
 /** HTTP message row — matches Android [com.securechat.data.remote.dto.MessageDto]. */
+@OptIn(ExperimentalSerializationApi::class)
 @Serializable
 data class MessageResponse(
     @SerialName("message_id") val messageId: String,
+    @SerialName("client_message_id") val clientMessageId: String? = null,
     @SerialName("chat_id") val chatId: String,
     @SerialName("sender_id") val senderId: String,
     @SerialName("recipient_id") val recipientId: String,
-    @SerialName("encrypted_payload") val encryptedPayload: String,
+    @SerialName("encryptedPayload") @JsonNames("encrypted_payload", "content") val encryptedPayload: String,
     @SerialName("ephemeral_key_id") val ephemeralKeyId: String,
-    val timestamp: Long,
+    @SerialName("createdAt") @JsonNames("created_at", "timestamp") val createdAt: Long,
     val status: String,
 )
 
 /** POST /chats/{id}/messages — matches Android [com.securechat.data.remote.dto.SendChatMessageRequest]. */
+@OptIn(ExperimentalSerializationApi::class)
 @Serializable
 data class SendMessageRequest(
+    @SerialName("clientMessageId") @JsonNames("client_message_id") val clientMessageId: String? = null,
     @SerialName("recipient_id") val recipientId: String? = null,
-    @SerialName("encrypted_payload") val encryptedPayload: String,
+    @SerialName("encryptedPayload") @JsonNames("encrypted_payload", "content") val encryptedPayload: String,
     @SerialName("ephemeral_key_id") val ephemeralKeyId: String = "",
 )
 
 /** POST /chats/{id}/messages response — matches Android [com.securechat.data.remote.dto.SendChatMessageResponse]. */
 @Serializable
 data class SendChatMessageResponse(
-    @SerialName("message_id") val messageId: String,
-    @SerialName("created_at") val createdAt: Long,
-    @SerialName("delivered_at") val deliveredAt: Long? = null,
+    val messageId: String,
+    val chatId: String,
+    val senderId: String,
+    val createdAt: Long,
+    val status: String,
+    val clientMessageId: String,
 )
 
 @Serializable
@@ -79,6 +88,7 @@ data class WsEnvelope(
 @Serializable
 data class WsIncomingMessagePayload(
     val messageId: String,
+    val clientMessageId: String? = null,
     val conversationId: String,
     val chatId: String? = null,
     val senderId: String,
@@ -92,6 +102,7 @@ data class WsIncomingMessagePayload(
 data class WsStatusPayload(
     val chatId: String? = null,
     val messageId: String,
+    val clientMessageId: String? = null,
     val status: String,
 )
 

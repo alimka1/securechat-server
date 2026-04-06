@@ -93,6 +93,7 @@ object ChatParticipants : Table("chat_participants") {
 
 object Messages : Table("messages") {
     val id = varchar("id", 64)
+    val clientMessageId = varchar("client_message_id", 64).nullable().index()
     val chatId = varchar("chat_id", 255).index()
     val senderId = varchar("sender_id", 64).index()
     /** Opaque ciphertext / base64 payload (never interpreted as plaintext). */

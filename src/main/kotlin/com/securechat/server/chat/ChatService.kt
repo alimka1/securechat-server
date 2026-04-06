@@ -33,6 +33,7 @@ data class ChatSummary(
 
 data class ChatMessage(
     val messageId: String,
+    val clientMessageId: String? = null,
     val chatId: String,
     val senderId: String,
     val recipientId: String,
@@ -140,6 +141,7 @@ class ChatService {
         chatId: String,
         senderId: String,
         recipientId: String?,
+        clientMessageId: String?,
         encryptedPayload: String,
         ephemeralKeyId: String,
     ): ChatMessage = transaction {
@@ -153,9 +155,28 @@ class ChatService {
             if (others.size == 1) others.first() else ""
         }
 
+        val normalizedClientMessageId = clientMessageId?.trim()?.takeIf { it.isNotBlank() }
+
+        // Idempotency for retries/resends from the same sender.
+        if (!normalizedClientMessageId.isNullOrBlank()) {
+            val existing = Messages
+                .select {
+                    (Messages.chatId eq chatId) and
+                        (Messages.senderId eq senderId) and
+                        (Messages.clientMessageId eq normalizedClientMessageId)
+                }
+                .orderBy(Messages.createdAt, org.jetbrains.exposed.sql.SortOrder.DESC)
+                .limit(1)
+                .firstOrNull()
+            if (existing != null) {
+                return@transaction existing.toChatMessage()
+            }
+        }
+
         val id = UUID.randomUUID().toString()
         Messages.insert {
             it[Messages.id] = id
+            it[Messages.clientMessageId] = normalizedClientMessageId
             it[Messages.chatId] = chatId
             it[Messages.senderId] = senderId
             it[Messages.content] = encryptedPayload
@@ -168,6 +189,13 @@ class ChatService {
             .select { Messages.id eq id }
             .first()
             .toChatMessage()
+    }
+
+    fun getMessageById(chatId: String, messageId: String): ChatMessage? = transaction {
+        Messages
+            .select { (Messages.id eq messageId) and (Messages.chatId eq chatId) }
+            .firstOrNull()
+            ?.toChatMessage()
     }
 
     fun getOrCreateDirectChat(
@@ -324,6 +352,7 @@ class ChatService {
     private fun ResultRow.toChatMessage(): ChatMessage =
         ChatMessage(
             messageId = this[Messages.id],
+            clientMessageId = this[Messages.clientMessageId],
             chatId = this[Messages.chatId],
             senderId = this[Messages.senderId],
             recipientId = this[Messages.recipientId].orEmpty(),

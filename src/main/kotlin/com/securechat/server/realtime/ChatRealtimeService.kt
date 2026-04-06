@@ -59,6 +59,7 @@ class ChatRealtimeService(
         if (recipients.isEmpty()) return
         val inner = WsIncomingMessagePayload(
             messageId = message.messageId,
+            clientMessageId = message.clientMessageId,
             conversationId = message.chatId,
             chatId = message.chatId,
             senderId = message.senderId,
@@ -71,6 +72,7 @@ class ChatRealtimeService(
             type = "new_message",
             payload = buildJsonObject {
                 put("messageId", inner.messageId)
+                inner.clientMessageId?.let { put("clientMessageId", it) }
                 put("conversationId", inner.conversationId)
                 put("chatId", inner.chatId ?: inner.conversationId)
                 put("senderId", inner.senderId)
@@ -87,16 +89,23 @@ class ChatRealtimeService(
         recipients: Collection<String>,
         chatId: String,
         messageId: String,
+        clientMessageId: String? = null,
         status: String,
     ) {
         if (recipients.isEmpty()) return
-        val inner = WsStatusPayload(chatId = chatId, messageId = messageId, status = status)
+        val inner = WsStatusPayload(
+            chatId = chatId,
+            messageId = messageId,
+            clientMessageId = clientMessageId,
+            status = status,
+        )
         val envelope = WsEnvelope(
             type = "message_status",
             payload = buildJsonObject {
                 put("chatId", inner.chatId)
                 put("conversationId", inner.chatId)
                 put("messageId", inner.messageId)
+                inner.clientMessageId?.let { put("clientMessageId", it) }
                 put("status", inner.status)
             },
         )
