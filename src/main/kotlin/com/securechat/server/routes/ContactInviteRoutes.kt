@@ -82,6 +82,7 @@ fun Route.contactInviteRoutes(
                         createdAt = chat.createdAt,
                         peerUserId = chat.peerUserId,
                         peerUsername = chat.peerUsername,
+                        peerAvatarUrl = chat.peerAvatarUrl,
                         lastMessagePreview = chat.lastMessagePreview,
                         lastMessageAt = chat.lastMessageAt,
                     ),

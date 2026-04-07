@@ -42,6 +42,9 @@ import java.io.File
 import java.util.Date
 import java.util.UUID
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.put
+import kotlinx.serialization.json.jsonObject
 
 fun Application.configureRouting(json: Json) {
 
@@ -271,6 +274,27 @@ fun Application.configureRouting(json: Json) {
             profileRoutes()
             chatRoutes(chatService, chatRealtimeService)
             contactInviteRoutes(contactInviteService, chatService)
+
+            post("/calls/signal") {
+                val principal = call.principal<JWTPrincipal>()!!
+                val userId = Security.userId(principal)
+                val rawBody = call.receiveText()
+                val payload = runCatching { json.parseToJsonElement(rawBody).jsonObject }.getOrNull()
+                if (payload == null) {
+                    call.respond(HttpStatusCode.BadRequest, ErrorResponse("Invalid call signal payload"))
+                    return@post
+                }
+                val envelope = buildJsonObject {
+                    put("type", "call_signal")
+                    put("payload", payload)
+                }.toString()
+                runCatching { realtimeCommandService.handleTextCommand(userId, envelope) }
+                    .onFailure {
+                        call.respond(HttpStatusCode.BadRequest, ErrorResponse("Call signal rejected: ${it.message ?: "invalid"}"))
+                        return@post
+                    }
+                call.respond(HttpStatusCode.Accepted, mapOf("status" to "ok"))
+            }
 
             webSocket("/ws/chat") {
                 val principal = call.principal<JWTPrincipal>()!!

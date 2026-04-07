@@ -4,6 +4,7 @@ import com.securechat.server.models.AuthUsers
 import com.securechat.server.models.ChatParticipants
 import com.securechat.server.models.Chats
 import com.securechat.server.models.Messages
+import com.securechat.server.models.Profiles
 import kotlinx.datetime.toJavaInstant
 import org.jetbrains.exposed.sql.ResultRow
 import org.jetbrains.exposed.sql.SqlExpressionBuilder.eq
@@ -27,6 +28,7 @@ data class ChatSummary(
     val createdAt: Long,
     val peerUserId: String? = null,
     val peerUsername: String? = null,
+    val peerAvatarUrl: String? = null,
     val lastMessagePreview: String? = null,
     val lastMessageAt: Long = 0L,
 )
@@ -64,6 +66,7 @@ class ChatService {
 
             var peerUserId: String? = null
             var peerUsername: String? = null
+            var peerAvatarUrl: String? = null
             if (isDirect) {
                 val participants = ChatParticipants
                     .select { ChatParticipants.chatId eq chatId }
@@ -74,6 +77,10 @@ class ChatService {
                         .select { AuthUsers.userId eq peerUserId }
                         .firstOrNull()
                         ?.get(AuthUsers.username)
+                    peerAvatarUrl = Profiles
+                        .select { Profiles.userId eq peerUserId }
+                        .firstOrNull()
+                        ?.get(Profiles.avatarUrl)
                 }
             }
 
@@ -83,6 +90,7 @@ class ChatService {
                 createdAt = row[Chats.createdAt].toJavaInstant().toEpochMilli(),
                 peerUserId = peerUserId,
                 peerUsername = peerUsername,
+                peerAvatarUrl = peerAvatarUrl,
                 lastMessagePreview = lastMessagePreviewForChat(chatId),
                 lastMessageAt = lastMessageAtForChat(chatId),
             )
@@ -230,6 +238,10 @@ class ChatService {
                     .select { AuthUsers.userId eq otherUserId }
                     .firstOrNull()
                     ?.get(AuthUsers.username),
+                peerAvatarUrl = Profiles
+                    .select { Profiles.userId eq otherUserId }
+                    .firstOrNull()
+                    ?.get(Profiles.avatarUrl),
                 lastMessagePreview = lastMessagePreviewForChat(existingChatId),
                 lastMessageAt = lastMessageAtForChat(existingChatId),
             )
@@ -264,6 +276,10 @@ class ChatService {
                 .select { AuthUsers.userId eq otherUserId }
                 .firstOrNull()
                 ?.get(AuthUsers.username),
+            peerAvatarUrl = Profiles
+                .select { Profiles.userId eq otherUserId }
+                .firstOrNull()
+                ?.get(Profiles.avatarUrl),
             lastMessagePreview = lastMessagePreviewForChat(chatId),
             lastMessageAt = lastMessageAtForChat(chatId),
         )

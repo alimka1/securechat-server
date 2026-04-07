@@ -37,6 +37,7 @@ fun Route.chatRoutes(
                     isDirect = it.isDirect,
                     peerUserId = it.peerUserId,
                     peerUsername = it.peerUsername,
+                    peerAvatarUrl = it.peerAvatarUrl,
                     participantId = it.peerUserId.orEmpty(),
                     lastMessagePreview = it.lastMessagePreview,
                     lastMessageAt = it.lastMessageAt,
@@ -164,6 +165,7 @@ fun Route.chatRoutes(
                             chatId = summary.chatId,
                             peerUserId = summary.peerUserId,
                             peerUsername = summary.peerUsername,
+                            peerAvatarUrl = summary.peerAvatarUrl,
                             lastMessagePreview = summary.lastMessagePreview,
                             lastMessageAt = summary.lastMessageAt,
                         ),
@@ -310,6 +312,7 @@ fun Route.chatRoutes(
                     createdAt = chat.createdAt,
                     peerUserId = chat.peerUserId,
                     peerUsername = chat.peerUsername,
+                    peerAvatarUrl = chat.peerAvatarUrl,
                     lastMessagePreview = chat.lastMessagePreview,
                     lastMessageAt = chat.lastMessageAt,
                 )

@@ -157,6 +157,7 @@ class ChatRealtimeService(
                 put("chatId", event.chatId)
                 event.peerUserId?.let { put("peerUserId", it) }
                 event.peerUsername?.let { put("peerUsername", it) }
+                event.peerAvatarUrl?.let { put("peerAvatarUrl", it) }
                 event.peerUserId?.let { put("participantId", it) }
                 event.lastMessagePreview?.let { put("lastMessagePreview", it) }
                 put("lastMessageAt", event.lastMessageAt)
@@ -171,20 +172,28 @@ class ChatRealtimeService(
     ) {
         val inner = CallSignalWsPayload(
             callId = event.callId,
+            chatId = event.chatId,
             fromUserId = event.fromUserId,
             fromDisplayName = null,
             toUserId = null,
             type = "REQUEST",
+            action = "call_initiation",
+            callType = event.callType,
+            transportMode = event.transportMode,
             timestamp = event.createdAt,
         )
         val envelope = WsEnvelope(
-            type = "call",
+            type = "call_signal",
             payload = buildJsonObject {
                 put("callId", inner.callId)
+                inner.chatId?.let { put("chatId", it) }
                 put("fromUserId", inner.fromUserId)
                 inner.fromDisplayName?.let { put("fromDisplayName", it) }
                 inner.toUserId?.let { put("toUserId", it) }
                 put("type", inner.type)
+                put("action", inner.action)
+                inner.callType?.let { put("callType", it) }
+                inner.transportMode?.let { put("transportMode", it) }
                 put("timestamp", inner.timestamp)
             },
         )
@@ -196,22 +205,59 @@ class ChatRealtimeService(
         event: CallStateUpdatePush,
     ) {
         if (recipients.isEmpty()) return
+        val action = when (event.state.lowercase()) {
+            "ringing" -> "ringing"
+            "accepted" -> "accept"
+            "declined" -> "reject"
+            "cancelled" -> "reject"
+            "ended" -> "end"
+            "ice" -> "ice_candidate"
+            "offer" -> "offer"
+            "answer" -> "answer"
+            else -> event.state.lowercase()
+        }
+        val typeCompat = when (action) {
+            "call_initiation", "ringing" -> "REQUEST"
+            "accept" -> "ACCEPT"
+            "reject" -> "DECLINE"
+            "end" -> "END"
+            "offer" -> "OFFER"
+            "answer" -> "ANSWER"
+            "ice_candidate" -> "ICE_CANDIDATE"
+            else -> "REQUEST"
+        }
         val inner = CallSignalWsPayload(
             callId = event.callId,
+            chatId = event.chatId,
             fromUserId = event.actorUserId,
             fromDisplayName = null,
             toUserId = event.targetUserId,
-            type = event.state,
+            type = typeCompat,
+            action = action,
+            callType = event.callType,
+            transportMode = event.transportMode,
+            sdp = event.sdp,
+            candidate = event.candidate,
+            sdpMid = event.sdpMid,
+            sdpMLineIndex = event.sdpMLineIndex,
             timestamp = event.updatedAt,
         )
         val envelope = WsEnvelope(
-            type = "call",
+            type = "call_signal",
             payload = buildJsonObject {
                 put("callId", inner.callId)
+                inner.chatId?.let { put("chatId", it) }
                 put("fromUserId", inner.fromUserId)
                 inner.fromDisplayName?.let { put("fromDisplayName", it) }
                 inner.toUserId?.let { put("toUserId", it) }
                 put("type", inner.type)
+                put("action", inner.action)
+                inner.callType?.let { put("callType", it) }
+                inner.transportMode?.let { put("transportMode", it) }
+                inner.sdp?.let { put("sdp", it) }
+                inner.candidate?.let { put("candidate", it) }
+                inner.sdpMid?.let { put("sdpMid", it) }
+                inner.sdpMLineIndex?.let { put("sdpMLineIndex", it) }
                 put("timestamp", inner.timestamp)
             },
         )

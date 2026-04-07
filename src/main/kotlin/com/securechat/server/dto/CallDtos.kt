@@ -1,5 +1,6 @@
 package com.securechat.server.dto
 
+import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 
 @Serializable
@@ -8,6 +9,8 @@ data class IncomingCallPush(
     val callId: String,
     val chatId: String,
     val fromUserId: String,
+    val callType: String = "audio",
+    val transportMode: String = "DIRECT_P2P",
     val createdAt: Long,
 )
 
@@ -19,7 +22,12 @@ data class CallStateUpdatePush(
     val state: String,
     val actorUserId: String,
     val targetUserId: String? = null,
-    val payload: String? = null, // optional signaling payload (e.g. ICE candidate blob)
+    val callType: String? = null,
+    val transportMode: String? = null,
+    val sdp: String? = null,
+    val candidate: String? = null,
+    val sdpMid: String? = null,
+    val sdpMLineIndex: Int? = null,
     val updatedAt: Long,
 )
 
@@ -27,10 +35,19 @@ data class CallStateUpdatePush(
 @Serializable
 data class CallSignalWsPayload(
     val callId: String,
+    val chatId: String? = null,
     val fromUserId: String,
     val fromDisplayName: String? = null,
     val toUserId: String? = null,
-    val type: String,
+    @SerialName("type")
+    val type: String, // compatibility alias for older clients
+    val action: String = type.lowercase(),
+    val callType: String? = null,
+    val transportMode: String? = null,
+    val sdp: String? = null,
+    val candidate: String? = null,
+    val sdpMid: String? = null,
+    val sdpMLineIndex: Int? = null,
     val timestamp: Long,
 )
 

@@ -24,6 +24,8 @@ class CallSignalingService(
         callerUserId: String,
         chatId: String,
         calleeUserId: String,
+        callType: String = "audio",
+        requestedCallId: String? = null,
     ) {
         require(callerUserId != calleeUserId) { "Cannot call yourself" }
 
@@ -33,11 +35,18 @@ class CallSignalingService(
         }
 
         val now = System.currentTimeMillis()
+        val callId = requestedCallId
+            ?.trim()
+            ?.takeIf { it.isNotBlank() }
+            ?.takeUnless { activeCalls.containsKey(it) }
+            ?: UUID.randomUUID().toString()
         val call = ActiveCall(
-            callId = UUID.randomUUID().toString(),
+            callId = callId,
             chatId = chatId,
             callerUserId = callerUserId,
             calleeUserId = calleeUserId,
+            callType = if (callType.equals("video", ignoreCase = true)) "video" else "audio",
+            transportMode = "DIRECT_P2P",
             state = CallState.RINGING,
             updatedAt = now,
         )
@@ -52,6 +61,8 @@ class CallSignalingService(
                 callId = call.callId,
                 chatId = call.chatId,
                 fromUserId = call.callerUserId,
+                callType = call.callType,
+                transportMode = call.transportMode,
                 createdAt = now,
             ),
         )
@@ -63,6 +74,26 @@ class CallSignalingService(
         userId: String,
         callId: String,
     ) = transitionCall(userId, callId, expectedActor = Actor.CALLEE, newState = CallState.ACCEPTED)
+
+    suspend fun markRinging(
+        userId: String,
+        callId: String,
+    ) {
+        val call = getCall(callId)
+        require(call.participants().contains(userId)) { "User is not part of this call" }
+        realtime.pushCallStateUpdate(
+            recipients = call.participants(),
+            event = CallStateUpdatePush(
+                callId = call.callId,
+                chatId = call.chatId,
+                state = CallState.RINGING.value,
+                actorUserId = userId,
+                callType = call.callType,
+                transportMode = call.transportMode,
+                updatedAt = System.currentTimeMillis(),
+            ),
+        )
+    }
 
     suspend fun declineCall(
         userId: String,
@@ -95,7 +126,9 @@ class CallSignalingService(
     suspend fun relayIce(
         userId: String,
         callId: String,
-        payload: String,
+        candidate: String,
+        sdpMid: String?,
+        sdpMLineIndex: Int?,
     ) {
         val call = getCall(callId)
         require(call.participants().contains(userId)) { "User is not part of this call" }
@@ -108,7 +141,59 @@ class CallSignalingService(
                 state = CallState.ICE.value,
                 actorUserId = userId,
                 targetUserId = target,
-                payload = payload,
+                callType = call.callType,
+                transportMode = call.transportMode,
+                candidate = candidate,
+                sdpMid = sdpMid,
+                sdpMLineIndex = sdpMLineIndex,
+                updatedAt = System.currentTimeMillis(),
+            ),
+        )
+    }
+
+    suspend fun relayOffer(
+        userId: String,
+        callId: String,
+        sdp: String,
+    ) {
+        val call = getCall(callId)
+        require(call.participants().contains(userId)) { "User is not part of this call" }
+        val target = call.participants().first { it != userId }
+        realtime.pushCallStateUpdate(
+            recipients = listOf(target),
+            event = CallStateUpdatePush(
+                callId = call.callId,
+                chatId = call.chatId,
+                state = CallState.OFFER.value,
+                actorUserId = userId,
+                targetUserId = target,
+                callType = call.callType,
+                transportMode = call.transportMode,
+                sdp = sdp,
+                updatedAt = System.currentTimeMillis(),
+            ),
+        )
+    }
+
+    suspend fun relayAnswer(
+        userId: String,
+        callId: String,
+        sdp: String,
+    ) {
+        val call = getCall(callId)
+        require(call.participants().contains(userId)) { "User is not part of this call" }
+        val target = call.participants().first { it != userId }
+        realtime.pushCallStateUpdate(
+            recipients = listOf(target),
+            event = CallStateUpdatePush(
+                callId = call.callId,
+                chatId = call.chatId,
+                state = CallState.ANSWER.value,
+                actorUserId = userId,
+                targetUserId = target,
+                callType = call.callType,
+                transportMode = call.transportMode,
+                sdp = sdp,
                 updatedAt = System.currentTimeMillis(),
             ),
         )
@@ -180,6 +265,8 @@ class CallSignalingService(
                 chatId = call.chatId,
                 state = state.value,
                 actorUserId = actorUserId,
+                callType = call.callType,
+                transportMode = call.transportMode,
                 updatedAt = call.updatedAt,
             ),
         )
@@ -191,6 +278,8 @@ private data class ActiveCall(
     val chatId: String,
     val callerUserId: String,
     val calleeUserId: String,
+    val callType: String,
+    val transportMode: String,
     val state: CallState,
     val updatedAt: Long,
 ) {
@@ -208,6 +297,8 @@ enum class CallState(val value: String) {
     DECLINED("declined"),
     CANCELLED("cancelled"),
     ENDED("ended"),
+    OFFER("offer"),
+    ANSWER("answer"),
     ICE("ice"),
 }
 

@@ -19,6 +19,7 @@ data class ChatSummaryResponse(
     val createdAt: Long,
     val peerUserId: String? = null,
     val peerUsername: String? = null,
+    val peerAvatarUrl: String? = null,
     val lastMessagePreview: String? = null,
     val lastMessageAt: Long? = null,
 )
@@ -30,6 +31,7 @@ data class ChatListItemResponse(
     @SerialName("is_direct") val isDirect: Boolean = true,
     @SerialName("peer_user_id") val peerUserId: String? = null,
     @SerialName("peer_username") val peerUsername: String? = null,
+    @SerialName("peer_avatar_url") val peerAvatarUrl: String? = null,
     @SerialName("participant_id") val participantId: String,
     @SerialName("last_message_preview") val lastMessagePreview: String? = null,
     @SerialName("last_message_at") val lastMessageAt: Long,
@@ -118,6 +120,7 @@ data class WsChatUpdatedPayload(
     val chatId: String,
     val peerUserId: String? = null,
     val peerUsername: String? = null,
+    val peerAvatarUrl: String? = null,
     val lastMessagePreview: String? = null,
     val lastMessageAt: Long,
 )
