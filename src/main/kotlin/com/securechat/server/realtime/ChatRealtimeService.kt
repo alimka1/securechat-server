@@ -18,7 +18,10 @@ import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
+import org.slf4j.LoggerFactory
 import java.util.concurrent.ConcurrentHashMap
+
+private val callRealtimeLog = LoggerFactory.getLogger("SC_CallRealtime")
 
 class ChatRealtimeService(
     private val json: Json,
@@ -177,7 +180,7 @@ class ChatRealtimeService(
             fromDisplayName = null,
             toUserId = null,
             type = "REQUEST",
-            action = "call_initiation",
+            action = "call_initiate",
             callType = event.callType,
             transportMode = event.transportMode,
             timestamp = event.createdAt,
@@ -197,7 +200,14 @@ class ChatRealtimeService(
                 put("timestamp", inner.timestamp)
             },
         )
-        broadcast(listOf(recipientUserId), json.encodeToString(WsEnvelope.serializer(), envelope))
+        val encoded = json.encodeToString(WsEnvelope.serializer(), envelope)
+        callRealtimeLog.debug(
+            "pushIncomingCall to={} callId={} bytes={}",
+            recipientUserId,
+            event.callId,
+            encoded.length,
+        )
+        broadcast(listOf(recipientUserId), encoded)
     }
 
     suspend fun pushCallStateUpdate(
@@ -206,23 +216,23 @@ class ChatRealtimeService(
     ) {
         if (recipients.isEmpty()) return
         val action = when (event.state.lowercase()) {
-            "ringing" -> "ringing"
-            "accepted" -> "accept"
-            "declined" -> "reject"
-            "cancelled" -> "reject"
-            "ended" -> "end"
+            "ringing" -> "call_ringing"
+            "accepted" -> "call_accept"
+            "declined" -> "call_reject"
+            "cancelled" -> "call_reject"
+            "ended" -> "call_end"
             "ice" -> "ice_candidate"
-            "offer" -> "offer"
-            "answer" -> "answer"
+            "offer" -> "webrtc_offer"
+            "answer" -> "webrtc_answer"
             else -> event.state.lowercase()
         }
         val typeCompat = when (action) {
-            "call_initiation", "ringing" -> "REQUEST"
-            "accept" -> "ACCEPT"
-            "reject" -> "DECLINE"
-            "end" -> "END"
-            "offer" -> "OFFER"
-            "answer" -> "ANSWER"
+            "call_initiate", "call_initiation", "call_ringing", "ringing" -> "REQUEST"
+            "call_accept", "accept" -> "ACCEPT"
+            "call_reject", "reject" -> "DECLINE"
+            "call_end", "end" -> "END"
+            "webrtc_offer", "offer" -> "OFFER"
+            "webrtc_answer", "answer" -> "ANSWER"
             "ice_candidate" -> "ICE_CANDIDATE"
             else -> "REQUEST"
         }
@@ -261,7 +271,16 @@ class ChatRealtimeService(
                 put("timestamp", inner.timestamp)
             },
         )
-        broadcast(recipients, json.encodeToString(WsEnvelope.serializer(), envelope))
+        val encoded = json.encodeToString(WsEnvelope.serializer(), envelope)
+        callRealtimeLog.debug(
+            "pushCallStateUpdate recipients={} callId={} action={} state={} bytes={}",
+            recipients,
+            event.callId,
+            action,
+            event.state,
+            encoded.length,
+        )
+        broadcast(recipients, encoded)
     }
 
     suspend fun filterOnlineUsers(

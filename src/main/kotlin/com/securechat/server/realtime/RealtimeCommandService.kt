@@ -7,6 +7,9 @@ import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
+import org.slf4j.LoggerFactory
+
+private val callCmdLog = LoggerFactory.getLogger("SC_CallCmd")
 
 class RealtimeCommandService(
     private val json: Json,
@@ -72,19 +75,28 @@ class RealtimeCommandService(
                     .ifBlank { payload?.get("type")?.jsonPrimitive?.content?.trim().orEmpty() }
                     .lowercase()
                 val normalizedAction = when (action) {
-                    "call_initiation" -> "call_initiation"
-                    "ringing" -> "ringing"
-                    "accept", "accepted" -> "accept"
-                    "reject", "decline", "declined", "cancel", "cancelled" -> "reject"
-                    "end", "ended", "hangup" -> "end"
-                    "offer" -> "offer"
-                    "answer" -> "answer"
+                    "call_initiation", "call_initiate", "request" -> "call_initiation"
+                    "call_ringing", "ringing" -> "ringing"
+                    "accept", "accepted", "call_accept" -> "accept"
+                    "reject", "decline", "declined", "cancel", "cancelled", "call_reject" -> "reject"
+                    "end", "ended", "hangup", "call_end" -> "end"
+                    "offer", "webrtc_offer" -> "offer"
+                    "answer", "webrtc_answer" -> "answer"
                     "ice", "ice_candidate" -> "ice_candidate"
                     else -> action
                 }
                 val callType = payload?.get("callType")?.jsonPrimitive?.content?.trim().orEmpty()
                 val sdp = payload?.get("sdp")?.jsonPrimitive?.content?.trim().orEmpty()
                 val candidate = payload?.get("candidate")?.jsonPrimitive?.content?.trim().orEmpty()
+                callCmdLog.debug(
+                    "call_signal user={} normalized={} callId={} chatId={} hasSdp={} hasCand={}",
+                    userId,
+                    normalizedAction,
+                    callId,
+                    chatId,
+                    sdp.isNotBlank(),
+                    candidate.isNotBlank(),
+                )
                 val sdpMid = payload?.get("sdpMid")?.jsonPrimitive?.content
                 val sdpMLineIndex = payload?.get("sdpMLineIndex")?.jsonPrimitive?.content?.toIntOrNull()
 
